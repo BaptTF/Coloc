@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Serveur Vidéo</title>
+<style>
+body {
+font-family: Arial, sans-serif;
+max-width: 800px;
+margin: 50px auto;
+padding: 20px;
+background-color: #f5f5f5;
+}
+.container {
+background: white;
+padding: 30px;
+border-radius: 8px;
+box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+h1 {
+color: #333;
+margin-top: 0;
+}
+.form-group {
+margin-bottom: 20px;
+}
+label {
+display: block;
+margin-bottom: 5px;
+font-weight: bold;
+color: #555;
+}
+input[type="text"] {
+width: 100%;
+padding: 10px;
+border: 1px solid #ddd;
+border-radius: 4px;
+box-sizing: border-box;
+font-size: 14px;
+}
+button {
+padding: 12px 24px;
+margin-right: 10px;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+font-size: 14px;
+font-weight: bold;
+}
+.btn-direct {
+background-color: #4CAF50;
+color: white;
+}
+.btn-youtube {
+background-color: #f44336;
+color: white;
+}
+button:hover {
+opacity: 0.9;
+}
+button:disabled {
+background-color: #ccc;
+cursor: not-allowed;
+}
+.message {
+margin-top: 20px;
+padding: 15px;
+border-radius: 4px;
+display: none;
+}
+.success {
+background-color: #d4edda;
+color: #155724;
+border: 1px solid #c3e6cb;
+}
+.error {
+background-color: #f8d7da;
+color: #721c24;
+border: 1px solid #f5c6cb;
+}
+.info {
+background-color: #d1ecf1;
+color: #0c5460;
+border: 1px solid #bee5eb;
+}
+.videos-link {
+margin-top: 20px;
+text-align: center;
+}
+.videos-link a {
+color: #007bff;
+text-decoration: none;
+}
+.videos-link a:hover {
+text-decoration: underline;
+}
+.vlc-section {
+background: #f8f9fa;
+padding: 20px;
+border-radius: 8px;
+margin: 20px 0;
+border: 2px solid #e9ecef;
+}
+.vlc-status {
+display: inline-block;
+padding: 5px 10px;
+border-radius: 15px;
+font-size: 12px;
+font-weight: bold;
+}
+.vlc-connected {
+background: #d4edda;
+color: #155724;
+}
+.vlc-disconnected {
+background: #f8d7da;
+color: #721c24;
+}
+.video-grid {
+display: grid;
+grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+gap: 15px;
+margin-top: 20px;
+}
+.video-card {
+background: #f8f9fa;
+border: 1px solid #dee2e6;
+border-radius: 8px;
+padding: 15px;
+text-align: center;
+cursor: pointer;
+transition: all 0.3s;
+}
+.video-card:hover {
+background: #e9ecef;
+transform: translateY(-2px);
+box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+.video-card h4 {
+margin: 0 0 10px 0;
+font-size: 14px;
+color: #333;
+word-break: break-word;
+}
+.btn-vlc {
+background-color: #ff8c00;
+color: white;
+padding: 8px 16px;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+font-size: 12px;
+}
+.btn-vlc:hover {
+background-color: #e67e00;
+}
+.form-row {
+display: flex;
+gap: 10px;
+align-items: end;
+}
+.form-row .form-group {
+flex: 1;
+margin-bottom: 0;
+}
+.form-row button {
+margin: 0;
+}
+.modal {
+display: none;
+position: fixed;
+z-index: 1000;
+left: 0;
+top: 0;
+width: 100%;
+height: 100%;
+background-color: rgba(0,0,0,0.5);
+}
+.modal-content {
+background-color: #fefefe;
+margin: 15% auto;
+padding: 30px;
+border-radius: 8px;
+width: 400px;
+max-width: 90%;
+text-align: center;
+box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.close {
+color: #aaa;
+float: right;
+font-size: 28px;
+font-weight: bold;
+cursor: pointer;
+line-height: 1;
+}
+.close:hover {
+color: #000;
+}
+.code-input {
+width: 200px;
+padding: 15px;
+font-size: 24px;
+text-align: center;
+border: 2px solid #ddd;
+border-radius: 8px;
+margin: 20px 0;
+letter-spacing: 8px;
+}
+.modal-buttons {
+margin-top: 20px;
+}
+.modal-buttons button {
+margin: 0 10px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>📹 Téléchargeur de Vidéos</h1>
+
+<div class="form-group">
+<label for="backendUrl">URL backend :</label>
+<input type="text" id="backendUrl" placeholder="http://192.168.4.28:8080">
+</div>
+<div class="vlc-section">
+<h3>🔗 Configuration VLC</h3>
+<div class="form-row">
+<div class="form-group">
+<label for="vlcUrl">URL serveur VLC :</label>
+<input type="text" id="vlcUrl" placeholder="https://192.168.4.27:8443">
+</div>
+<button onclick="testVLCConnection()" class="btn-vlc">Tester</button>
+<button onclick="loginToVLC()" class="btn-vlc" id="loginBtn">Se connecter</button>
+</div>
+<div id="vlc-status" class="vlc-status vlc-disconnected">Déconnecté</div>
+<div id="vlc-auth-status" class="vlc-status vlc-disconnected">Non authentifié</div>
+<div class="form-group">
+<input type="checkbox" id="autoPlay">
+<label for="autoPlay">Lancer automatiquement après téléchargement</label>
+</div>
+</div>
+
+<!-- Modal de connexion VLC -->
+<div id="vlcModal" class="modal">
+<div class="modal-content">
+<span class="close" onclick="closeVLCModal()">&times;</span>
+<h3>🔐 Connexion VLC</h3>
+<p>Entrez le code à 4 chiffres affiché sur votre VLC :</p>
+<input type="text" id="vlcCode" placeholder="1234" maxlength="4" class="code-input">
+<div class="modal-buttons">
+<button onclick="submitVLCLogin()" class="btn-youtube">Se connecter</button>
+<button onclick="closeVLCModal()" class="btn-direct">Annuler</button>
+</div>
+</div>
+</div>
+<div class="form-group">
+<label for="url">URL de la vidéo:</label>
+<input type="text" id="url" placeholder="https://...">
+</div>
+
+<div>
+<button class="btn-direct" onclick="downloadDirect()">Télécharger (URL directe)</button>
+<button class="btn-youtube" onclick="downloadYouTube()">Télécharger (YouTube/yt-dlp)</button>
+</div>
+
+<div id="message" class="message"></div>
+
+<div class="vlc-section">
+<h3>🎬 Vidéos disponibles</h3>
+<div class="videos-link">
+<a href="/videos/">📂 Accès direct aux fichiers</a>
+</div>
+<div id="videos-list" class="video-grid"></div>
+</div>
+</div>
+
+<script>
+const backendUrlInput = document.getElementById('backendUrl');
+const vlcUrlInput = document.getElementById('vlcUrl');
+const autoPlayCheckbox = document.getElementById('autoPlay');
+const urlInput = document.getElementById('url');
+const messageDiv = document.getElementById('message');
+const videosListDiv = document.getElementById('videos-list');
+
+function showMessage(text, type) {
+  messageDiv.textContent = text;
+  messageDiv.className = 'message ' + type;
+  messageDiv.style.display = 'block';
+}
+
+function hideMessage() {
+  messageDiv.style.display = 'none';
+}
+
+async function playVideo(filename) {
+  try {
+    const challenge = await fetch(vlcUrlInput.value + '/code').then(res => res.text());
+    const code = prompt('Entrez le code à 4 chiffres:');
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code + challenge));
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    await fetch(vlcUrlInput.value + '/verify-code', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: hashHex })
+    });
+    await fetch(vlcUrlInput.value + '/play?id=-1&path=' +
+      encodeURIComponent(backendUrlInput.value + '/videos/' + filename) +
+      '&type=stream', { credentials: 'include' });
+    showMessage('Lecture lancée: ' + filename, 'success');
+  } catch (err) {
+    showMessage('Erreur lecture VLC: ' + err.message, 'error');
+  }
+}
+
+async function download(endpoint, buttonText) {
+  const url = urlInput.value.trim();
+  if (!url) {
+    showMessage('Veuillez entrer une URL', 'error');
+    return;
+  }
+  hideMessage();
+  const buttons = document.querySelectorAll('button');
+  buttons.forEach(btn => btn.disabled = true);
+  showMessage('Téléchargement en cours...', 'info');
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await response.json();
+    if (data.success) {
+      showMessage('✓ ' + data.message + (data.file ? ' - ' + data.file : ''), 'success');
+      urlInput.value = '';
+      listVideos();
+      if (autoPlayCheckbox.checked && data.file) {
+        playVideo(data.file);
+      }
+    } else {
+      showMessage('✗ ' + data.message, 'error');
+    }
+  } catch (error) {
+    showMessage('✗ Erreur: ' + error.message, 'error');
+  } finally {
+    buttons.forEach(btn => btn.disabled = false);
+  }
+}
+
+function downloadDirect() { download('/url', 'Téléchargement direct'); }
+function downloadYouTube() { download('/urlyt', 'Téléchargement YouTube'); }
+
+urlInput.addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') downloadYouTube();
+});
+
+async function testVLCConnection() {
+  const statusDiv = document.getElementById('vlc-status');
+  try {
+    // Test simple : GET sur / du serveur VLC pour voir s'il répond
+    const response = await fetch(vlcUrlInput.value + '/', {
+      method: 'GET',
+      mode: 'cors'
+    });
+    
+    if (response.ok || response.status === 401) {
+      // 200 OK ou 401 Unauthorized signifient que VLC répond
+      statusDiv.className = 'vlc-status vlc-connected';
+      statusDiv.textContent = 'Connecté';
+      showMessage('VLC accessible', 'success');
+    } else {
+      statusDiv.className = 'vlc-status vlc-disconnected';
+      statusDiv.textContent = 'Déconnecté';
+      showMessage('VLC inaccessible: Status ' + response.status, 'error');
+    }
+  } catch (err) {
+    statusDiv.className = 'vlc-status vlc-disconnected';
+    statusDiv.textContent = 'Déconnecté';
+    showMessage('VLC inaccessible: ' + err.message, 'error');
+  }
+}
+
+async function listVideos() {
+  try {
+    const files = await fetch(backendUrlInput.value + '/list').then(res => res.json());
+    videosListDiv.innerHTML = '';
+    if (files.length === 0) {
+      videosListDiv.innerHTML = '<p style="text-align:center;color:#666;">Aucune vidéo disponible</p>';
+      return;
+    }
+    files.forEach(filename => {
+      const card = document.createElement('div');
+      card.className = 'video-card';
+      
+      const title = document.createElement('h4');
+      title.textContent = filename;
+      
+      const button = document.createElement('button');
+      button.className = 'btn-vlc';
+      button.textContent = '▶ Lancer sur VLC';
+      button.onclick = () => playVideo(filename);
+      
+      card.appendChild(title);
+      card.appendChild(button);
+      videosListDiv.appendChild(card);
+    });
+  } catch (err) {
+    console.error('Erreur listVideos:', err);
+    videosListDiv.innerHTML = '<p style="text-align:center;color:#f44336;">Erreur de chargement</p>';
+  }
+}
+
+let vlcChallenge = null;
+let vlcAuthenticated = false;
+
+async function loginToVLC() {
+  try {
+    // Sauvegarder l'URL VLC côté serveur avant de se connecter
+    await saveVLCConfig();
+    
+    const response = await fetch('/vlc/code?vlc=' + encodeURIComponent(vlcUrlInput.value));
+    vlcChallenge = await response.text();
+    document.getElementById('vlcModal').style.display = 'block';
+    document.getElementById('vlcCode').focus();
+  } catch (err) {
+    showMessage('Erreur: Impossible de contacter VLC - ' + err.message, 'error');
+  }
+}
+
+function closeVLCModal() {
+  document.getElementById('vlcModal').style.display = 'none';
+  document.getElementById('vlcCode').value = '';
+}
+
+async function submitVLCLogin() {
+  const code = document.getElementById('vlcCode').value;
+  if (!code || code.length !== 4) {
+    showMessage('Veuillez entrer un code à 4 chiffres', 'error');
+    return;
+  }
+  
+  try {
+    // Envoyer le code brut au serveur, qui calculera le hash côté serveur
+    console.log('[CLIENT DEBUG] Code saisi:', code);
+    console.log('[CLIENT DEBUG] Challenge reçu:', vlcChallenge);
+    console.log('[CLIENT DEBUG] Envoi du code brut au serveur');
+    
+    const response = await fetch('/vlc/verify-code?vlc=' + encodeURIComponent(vlcUrlInput.value), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code })
+    });
+    
+    console.log('[CLIENT DEBUG] Réponse serveur status:', response.status);
+    
+    if (response.ok) {
+      vlcAuthenticated = true;
+      document.getElementById('vlc-auth-status').className = 'vlc-status vlc-connected';
+      document.getElementById('vlc-auth-status').textContent = 'Authentifié';
+      document.getElementById('loginBtn').textContent = 'Reconnexion';
+      showMessage('Authentification VLC réussie', 'success');
+      closeVLCModal();
+    } else {
+      const errorText = await response.text();
+      console.log('[CLIENT DEBUG] Erreur serveur:', errorText);
+      showMessage('Code incorrect', 'error');
+    }
+  } catch (err) {
+    console.error('[CLIENT DEBUG] Exception:', err);
+    showMessage('Erreur d\'authentification: ' + err.message, 'error');
+  }
+}
+
+async function playVideoAuthenticated(filename) {
+  if (!vlcAuthenticated) {
+    showMessage('Veuillez d\'abord vous authentifier avec VLC', 'error');
+    return;
+  }
+  
+  try {
+    const encodedFilename = encodeURIComponent(filename);
+    const videoPath = backendUrlInput.value + '/videos/' + encodedFilename;
+    
+    const response = await fetch('/vlc/play?vlc=' + encodeURIComponent(vlcUrlInput.value) + 
+      '&id=-1&path=' + encodeURIComponent(videoPath) +
+      '&type=stream', { credentials: 'include' });
+      
+    if (response.ok) {
+      showMessage('Lecture lancée: ' + filename, 'success');
+    } else {
+      showMessage('Erreur de lecture: Session expirée', 'error');
+      vlcAuthenticated = false;
+      document.getElementById('vlc-auth-status').className = 'vlc-status vlc-disconnected';
+      document.getElementById('vlc-auth-status').textContent = 'Session expirée';
+    }
+  } catch (err) {
+    showMessage('Erreur lecture VLC: ' + err.message, 'error');
+  }
+}
+
+// Remplacer l'ancienne fonction playVideo
+async function playVideo(filename) {
+  return playVideoAuthenticated(filename);
+}
+
+// Gestion du modal avec clavier
+document.addEventListener('keydown', function(e) {
+  if (document.getElementById('vlcModal').style.display === 'block') {
+    if (e.key === 'Enter') {
+      submitVLCLogin();
+    } else if (e.key === 'Escape') {
+      closeVLCModal();
+    }
+  }
+});
+
+window.onload = async () => { 
+  backendUrlInput.value = window.location.origin;
+  listVideos();
+  
+  // Charger la configuration VLC sauvegardée
+  await loadVLCConfig();
+};
+
+// Charger la configuration VLC depuis le serveur
+async function loadVLCConfig() {
+  try {
+    const response = await fetch('/vlc/config');
+    const configs = await response.json();
+    
+    if (configs.length > 0) {
+      // Prendre la dernière configuration VLC utilisée
+      const lastConfig = configs[configs.length - 1];
+      vlcUrlInput.value = lastConfig.url;
+      
+      if (lastConfig.authenticated) {
+        vlcAuthenticated = true;
+        document.getElementById('vlc-auth-status').className = 'vlc-status vlc-connected';
+        document.getElementById('vlc-auth-status').textContent = 'Authentifié (persistant)';
+        document.getElementById('loginBtn').textContent = 'Reconnexion';
+        showMessage('Configuration VLC restaurée', 'success');
+      }
+    }
+  } catch (err) {
+    console.log('Aucune configuration VLC sauvegardée');
+  }
+}
+
+// Sauvegarder l'URL VLC côté serveur
+async function saveVLCConfig() {
+  const vlcUrl = vlcUrlInput.value.trim();
+  if (!vlcUrl) return;
+  
+  try {
+    await fetch('/vlc/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: vlcUrl })
+    });
+  } catch (err) {
+    console.error('Erreur sauvegarde config VLC:', err);
+  }
+}
+</script>
+</body>
+</html>

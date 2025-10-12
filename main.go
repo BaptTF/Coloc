@@ -1,18 +1,50 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"time"
+"crypto/sha256"
+_ "embed"
+"encoding/hex"
+"encoding/json"
+"fmt"
+"io"
+"net/http"
+"net/http/cookiejar"
+"net/url"
+"os"
+"os/exec"
+"path/filepath"
+"sort"
+"strings"
+"sync"
+"time"
+
+"github.com/sirupsen/logrus"
 )
 
+//go:embed index.html
+var indexHTML []byte
+
 const videoDir = "./videos"
+
+// Structure pour maintenir les sessions VLC
+type VLCSession struct {
+Challenge     string
+Client        *http.Client
+URL           string
+Authenticated bool
+LastActivity  time.Time
+}
+
+// Map pour stocker les sessions VLC par URL
+var vlcSessions = make(map[string]*VLCSession)
+var vlcSessionsMutex sync.RWMutex
+
+// Configuration VLC persistante
+type VLCConfig struct {
+URL           string `json:"url"`
+Authenticated bool   `json:"authenticated"`
+LastActivity  string `json:"last_activity"`
+}
 
 type URLRequest struct {
 	URL string `json:"url"`
@@ -25,9 +57,13 @@ type Response struct {
 }
 
 func main() {
+	// Configure logrus
+	logrus.SetFormatter(&logrus.JSONFormatter{})
+	logrus.SetLevel(logrus.InfoLevel)
+
 	// Crée le dossier videos s'il n'existe pas
 	if err := os.MkdirAll(videoDir, 0755); err != nil {
-		log.Fatal(err)
+		logrus.Fatal(err)
 	}
 
 	// Servir les vidéos en static
@@ -37,204 +73,20 @@ func main() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/url", downloadURLHandler)
 	http.HandleFunc("/urlyt", downloadYouTubeHandler)
+	http.HandleFunc("/list", listHandler)
+http.HandleFunc("/vlc/code", vlcCodeHandler)
+http.HandleFunc("/vlc/verify-code", vlcVerifyHandler)
+http.HandleFunc("/vlc/play", vlcPlayHandler)
+http.HandleFunc("/vlc/status", vlcStatusHandler)
+http.HandleFunc("/vlc/config", vlcConfigHandler)
 
-	log.Println("Serveur démarré sur http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	logrus.Info("Serveur démarré sur http://localhost:8080")
+	logrus.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(`
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Serveur Vidéo</title>
-	<style>
-		body {
-			font-family: Arial, sans-serif;
-			max-width: 800px;
-			margin: 50px auto;
-			padding: 20px;
-			background-color: #f5f5f5;
-		}
-		.container {
-			background: white;
-			padding: 30px;
-			border-radius: 8px;
-			box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-		}
-		h1 {
-			color: #333;
-			margin-top: 0;
-		}
-		.form-group {
-			margin-bottom: 20px;
-		}
-		label {
-			display: block;
-			margin-bottom: 5px;
-			font-weight: bold;
-			color: #555;
-		}
-		input[type="text"] {
-			width: 100%;
-			padding: 10px;
-			border: 1px solid #ddd;
-			border-radius: 4px;
-			box-sizing: border-box;
-			font-size: 14px;
-		}
-		button {
-			padding: 12px 24px;
-			margin-right: 10px;
-			border: none;
-			border-radius: 4px;
-			cursor: pointer;
-			font-size: 14px;
-			font-weight: bold;
-		}
-		.btn-direct {
-			background-color: #4CAF50;
-			color: white;
-		}
-		.btn-youtube {
-			background-color: #f44336;
-			color: white;
-		}
-		button:hover {
-			opacity: 0.9;
-		}
-		button:disabled {
-			background-color: #ccc;
-			cursor: not-allowed;
-		}
-		.message {
-			margin-top: 20px;
-			padding: 15px;
-			border-radius: 4px;
-			display: none;
-		}
-		.success {
-			background-color: #d4edda;
-			color: #155724;
-			border: 1px solid #c3e6cb;
-		}
-		.error {
-			background-color: #f8d7da;
-			color: #721c24;
-			border: 1px solid #f5c6cb;
-		}
-		.info {
-			background-color: #d1ecf1;
-			color: #0c5460;
-			border: 1px solid #bee5eb;
-		}
-		.videos-link {
-			margin-top: 20px;
-			text-align: center;
-		}
-		.videos-link a {
-			color: #007bff;
-			text-decoration: none;
-		}
-		.videos-link a:hover {
-			text-decoration: underline;
-		}
-	</style>
-</head>
-<body>
-	<div class="container">
-		<h1>📹 Téléchargeur de Vidéos</h1>
-		
-		<div class="form-group">
-			<label for="url">URL de la vidéo:</label>
-			<input type="text" id="url" placeholder="https://...">
-		</div>
-		
-		<div>
-			<button class="btn-direct" onclick="downloadDirect()">Télécharger (URL directe)</button>
-			<button class="btn-youtube" onclick="downloadYouTube()">Télécharger (YouTube/yt-dlp)</button>
-		</div>
-		
-		<div id="message" class="message"></div>
-		
-		<div class="videos-link">
-			<a href="/videos/">📂 Voir toutes les vidéos</a>
-		</div>
-	</div>
-
-	<script>
-		const urlInput = document.getElementById('url');
-		const messageDiv = document.getElementById('message');
-		
-		function showMessage(text, type) {
-			messageDiv.textContent = text;
-			messageDiv.className = 'message ' + type;
-			messageDiv.style.display = 'block';
-		}
-		
-		function hideMessage() {
-			messageDiv.style.display = 'none';
-		}
-		
-		async function download(endpoint, buttonText) {
-			const url = urlInput.value.trim();
-			
-			if (!url) {
-				showMessage('Veuillez entrer une URL', 'error');
-				return;
-			}
-			
-			hideMessage();
-			const buttons = document.querySelectorAll('button');
-			buttons.forEach(btn => btn.disabled = true);
-			
-			showMessage('Téléchargement en cours...', 'info');
-			
-			try {
-				const response = await fetch(endpoint, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ url: url })
-				});
-				
-				const data = await response.json();
-				
-				if (data.success) {
-					showMessage('✓ ' + data.message + (data.file ? ' - ' + data.file : ''), 'success');
-					urlInput.value = '';
-				} else {
-					showMessage('✗ ' + data.message, 'error');
-				}
-			} catch (error) {
-				showMessage('✗ Erreur: ' + error.message, 'error');
-			} finally {
-				buttons.forEach(btn => btn.disabled = false);
-			}
-		}
-		
-		function downloadDirect() {
-			download('/url', 'Téléchargement direct');
-		}
-		
-		function downloadYouTube() {
-			download('/urlyt', 'Téléchargement YouTube');
-		}
-		
-		// Permettre l'envoi avec Enter
-		urlInput.addEventListener('keypress', function(e) {
-			if (e.key === 'Enter') {
-				downloadYouTube();
-			}
-		});
-	</script>
-</body>
-</html>
-	`))
+	w.Write(indexHTML)
 }
 
 // downloadURLHandler télécharge une vidéo depuis une URL directe
@@ -255,7 +107,7 @@ func downloadURLHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Téléchargement de: %s", req.URL)
+	logrus.WithField("url", req.URL).Info("Début de téléchargement direct")
 
 	// Télécharger le fichier
 	resp, err := http.Get(req.URL)
@@ -289,9 +141,13 @@ func downloadURLHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Vidéo téléchargée: %s", filename)
+	logrus.WithFields(logrus.Fields{
+		"filename": filename,
+		"url":      req.URL,
+	}).Info("Vidéo téléchargée avec succès")
 
 	sendSuccess(w, "Vidéo téléchargée avec succès", filename)
+	pruneVideos()
 }
 
 // downloadYouTubeHandler télécharge une vidéo avec yt-dlp
@@ -312,7 +168,7 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Téléchargement YouTube de: %s", req.URL)
+	logrus.WithField("url", req.URL).Info("Début de téléchargement YouTube")
 
 	// Nom de fichier pour yt-dlp
 	outputTemplate := filepath.Join(videoDir, "%(title)s_%(id)s.%(ext)s")
@@ -326,7 +182,7 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Appeler yt-dlp
-	cmd = exec.Command("./yt-dlp", 
+	cmd = exec.Command("./yt-dlp",
 		"-f", "best[ext=mp4]",
 		"-o", outputTemplate,
 		"--no-playlist",
@@ -339,10 +195,13 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Vidéo YouTube téléchargée: %s", req.URL)
-	log.Printf("Output: %s", output)
+	logrus.WithFields(logrus.Fields{
+		"url":    req.URL,
+		"output": string(output),
+	}).Info("Vidéo YouTube téléchargée avec succès")
 
 	sendSuccess(w, "Vidéo YouTube téléchargée avec succès", "")
+	pruneVideos()
 }
 
 func sendError(w http.ResponseWriter, message string, status int) {
@@ -363,3 +222,391 @@ func sendSuccess(w http.ResponseWriter, message string, filename string) {
 	})
 }
 
+func listHandler(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		sendError(w, "Impossible de lister les vidéos", http.StatusInternalServerError)
+		return
+	}
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files = append(files, entry.Name())
+		}
+	}
+	sort.Strings(files)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(files)
+}
+
+func pruneVideos() {
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		logrus.WithError(err).Error("Erreur pruneVideos")
+		return
+	}
+	type fileInfo struct {
+		name    string
+		modTime time.Time
+	}
+	var files []fileInfo
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileInfo{name: entry.Name(), modTime: info.ModTime()})
+	}
+	if len(files) <= 10 {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].modTime.Before(files[j].modTime)
+	})
+	for _, fi := range files[:len(files)-10] {
+		os.Remove(filepath.Join(videoDir, fi.name))
+	}
+}
+
+func vlcCodeHandler(w http.ResponseWriter, r *http.Request) {
+	vlcUrl := r.URL.Query().Get("vlc")
+	if vlcUrl == "" {
+		sendError(w, "Paramètre vlc manquant", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithField("vlc_url", vlcUrl).Info("VLC CODE - Début demande challenge")
+
+	// Créer un client avec jar de cookies pour maintenir la session
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		sendError(w, "Erreur création cookie jar", http.StatusInternalServerError)
+		return
+	}
+	client := &http.Client{Jar: jar}
+
+// Selon test.py, il faut faire un POST avec form data: challenge=""
+formData := url.Values{}
+formData.Set("challenge", "")
+logrus.WithFields(logrus.Fields{
+"vlc_url": vlcUrl,
+"data":    formData.Encode(),
+}).Info("VLC CODE - Envoi vers VLC")
+
+resp, err := client.Post(vlcUrl+"/code", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url": vlcUrl,
+			"error":   err,
+		}).Error("VLC CODE - Erreur connexion VLC")
+		sendError(w, "Erreur connexion VLC: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcUrl,
+		"status":  resp.StatusCode,
+	}).Info("VLC CODE - Status reçu de VLC")
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		sendError(w, "Erreur lecture réponse VLC", http.StatusInternalServerError)
+		return
+	}
+
+	challenge := string(body)
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":          vlcUrl,
+		"challenge":        challenge,
+		"challenge_length": len(challenge),
+	}).Info("VLC CODE - Challenge reçu de VLC")
+
+	// Stocker la session pour cette URL VLC
+	vlcSessionsMutex.Lock()
+	vlcSessions[vlcUrl] = &VLCSession{
+		Challenge: challenge,
+		Client:    client,
+		URL:       vlcUrl,
+	}
+	vlcSessionsMutex.Unlock()
+
+	logrus.WithField("vlc_url", vlcUrl).Info("VLC CODE - Session stockée")
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(body)
+}
+
+func vlcVerifyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vlcUrl := r.URL.Query().Get("vlc")
+	if vlcUrl == "" {
+		sendError(w, "Paramètre vlc manquant", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Début vérification code")
+
+	// Récupérer la session VLC stockée
+	vlcSessionsMutex.RLock()
+	session, exists := vlcSessions[vlcUrl]
+	vlcSessionsMutex.RUnlock()
+
+	if !exists {
+		logrus.WithField("vlc_url", vlcUrl).Error("VLC VERIFY - Session VLC introuvable")
+		sendError(w, "Session VLC expirée, veuillez redemander un code", http.StatusBadRequest)
+		return
+	}
+
+	// Parser le JSON du client pour extraire le code brut (4 chiffres)
+	var clientData map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&clientData); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url": vlcUrl,
+			"error":   err,
+		}).Error("VLC VERIFY - Erreur parsing JSON")
+		sendError(w, "JSON invalide", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":     vlcUrl,
+		"client_data": clientData,
+	}).Info("VLC VERIFY - Données reçues du client")
+
+	rawCode, exists := clientData["code"]
+	if !exists {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url":     vlcUrl,
+			"client_data": clientData,
+		}).Error("VLC VERIFY - Code manquant dans les données")
+		sendError(w, "Code manquant", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":   vlcUrl,
+		"raw_code":  rawCode,
+		"challenge": session.Challenge,
+	}).Info("VLC VERIFY - Code brut reçu du client")
+
+	// Calculer le hash côté serveur comme dans test.py: sha256(code + challenge)
+	hasher := sha256.New()
+	hasher.Write([]byte(rawCode + session.Challenge))
+	hashBytes := hasher.Sum(nil)
+	hashHex := hex.EncodeToString(hashBytes)
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":       vlcUrl,
+		"raw_code":      rawCode,
+		"challenge":     session.Challenge,
+		"concatenation": rawCode + session.Challenge,
+		"hash":          hashHex,
+		"hash_length":   len(hashHex),
+	}).Info("VLC VERIFY - Hash calculé côté serveur")
+
+// Selon test.py, VLC attend form data: code=<hash>
+formData := url.Values{}
+formData.Set("code", hashHex)
+
+logrus.WithFields(logrus.Fields{
+"vlc_url": vlcUrl,
+"data":    formData.Encode(),
+}).Info("VLC VERIFY - Envoi vers VLC")
+
+resp, err := session.Client.Post(vlcUrl+"/verify-code", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url": vlcUrl,
+			"error":   err,
+		}).Error("VLC VERIFY -  coErreurnnexion VLC")
+		sendError(w, "Erreur connexion VLC: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcUrl,
+		"status":  resp.StatusCode,
+	}).Info("VLC VERIFY - Status reçu de VLC")
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		sendError(w, "Erreur lecture réponse VLC", http.StatusInternalServerError)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":  vlcUrl,
+		"response": string(respBody),
+	}).Info("VLC VERIFY - Réponse VLC")
+
+// Si l'authentification réussit, mettre à jour la session
+if resp.StatusCode == http.StatusOK {
+vlcSessionsMutex.Lock()
+session.Authenticated = true
+session.LastActivity = time.Now()
+vlcSessionsMutex.Unlock()
+logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Authentification réussie, session maintenue")
+}
+
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(resp.StatusCode)
+w.Write(respBody)
+}
+
+// vlcStatusHandler retourne l'état d'authentification pour une URL VLC
+func vlcStatusHandler(w http.ResponseWriter, r *http.Request) {
+vlcUrl := r.URL.Query().Get("vlc")
+if vlcUrl == "" {
+sendError(w, "Paramètre vlc manquant", http.StatusBadRequest)
+return
+}
+
+vlcSessionsMutex.RLock()
+session, exists := vlcSessions[vlcUrl]
+vlcSessionsMutex.RUnlock()
+
+config := VLCConfig{
+URL:           vlcUrl,
+Authenticated: exists && session.Authenticated,
+}
+
+if exists {
+config.LastActivity = session.LastActivity.Format(time.RFC3339)
+}
+
+w.Header().Set("Content-Type", "application/json")
+json.NewEncoder(w).Encode(config)
+}
+
+// vlcConfigHandler gère la configuration VLC (GET pour récupérer, POST pour définir)
+func vlcConfigHandler(w http.ResponseWriter, r *http.Request) {
+switch r.Method {
+case http.MethodGet:
+// Récupérer toutes les sessions VLC actives
+vlcSessionsMutex.RLock()
+configs := make([]VLCConfig, 0, len(vlcSessions))
+for url, session := range vlcSessions {
+configs = append(configs, VLCConfig{
+URL:           url,
+Authenticated: session.Authenticated,
+LastActivity:  session.LastActivity.Format(time.RFC3339),
+})
+}
+vlcSessionsMutex.RUnlock()
+
+w.Header().Set("Content-Type", "application/json")
+json.NewEncoder(w).Encode(configs)
+
+case http.MethodPost:
+// Définir une nouvelle URL VLC (sans authentification)
+var config VLCConfig
+if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+sendError(w, "JSON invalide", http.StatusBadRequest)
+return
+}
+
+if config.URL == "" {
+sendError(w, "URL VLC manquante", http.StatusBadRequest)
+return
+}
+
+// Créer une nouvelle session non authentifiée
+vlcSessionsMutex.Lock()
+vlcSessions[config.URL] = &VLCSession{
+URL:          config.URL,
+Authenticated: false,
+LastActivity: time.Now(),
+}
+vlcSessionsMutex.Unlock()
+
+logrus.WithField("vlc_url", config.URL).Info("VLC CONFIG - Nouvelle URL VLC définie")
+
+w.Header().Set("Content-Type", "application/json")
+json.NewEncoder(w).Encode(Response{
+Success: true,
+Message: "URL VLC définie",
+})
+
+default:
+sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+}
+}
+
+func vlcPlayHandler(w http.ResponseWriter, r *http.Request) {
+	vlcUrl := r.URL.Query().Get("vlc")
+	if vlcUrl == "" {
+		sendError(w, "Paramètre vlc manquant", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithField("vlc_url", vlcUrl).Info("VLC PLAY - Début lecture vidéo")
+
+	// Récupérer la session VLC stockée
+	vlcSessionsMutex.RLock()
+	session, exists := vlcSessions[vlcUrl]
+	vlcSessionsMutex.RUnlock()
+
+	if !exists {
+		logrus.WithField("vlc_url", vlcUrl).Error("VLC PLAY - Session VLC introuvable")
+		sendError(w, "Session VLC expirée, veuillez vous authentifier", http.StatusUnauthorized)
+		return
+	}
+
+	// Construire l'URL avec tous les paramètres (sans le paramètre vlc)
+	playUrl := vlcUrl + "/play?" + r.URL.RawQuery
+	// Retirer le paramètre vlc de l'URL
+	if queryParams := r.URL.Query(); len(queryParams) > 0 {
+		queryParams.Del("vlc")
+		playUrl = vlcUrl + "/play?" + queryParams.Encode()
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":  vlcUrl,
+		"play_url": playUrl,
+	}).Info("VLC PLAY - URL construite")
+
+	// Créer une nouvelle requête en utilisant le client de la session
+	req, err := http.NewRequest("GET", playUrl, nil)
+	if err != nil {
+		sendError(w, "Erreur création requête", http.StatusInternalServerError)
+		return
+	}
+
+	resp, err := session.Client.Do(req)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url": vlcUrl,
+			"error":   err,
+		}).Error("VLC PLAY - Erreur connexion VLC")
+		sendError(w, "Erreur connexion VLC: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcUrl,
+		"status":  resp.StatusCode,
+	}).Info("VLC PLAY - Status reçu de VLC")
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		sendError(w, "Erreur lecture réponse VLC", http.StatusInternalServerError)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url":  vlcUrl,
+		"response": string(respBody),
+	}).Info("VLC PLAY - Réponse VLC")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
+}
