@@ -180,7 +180,7 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 	logrus.WithField("url", req.URL).Info("Début de téléchargement YouTube")
 
 // Nom de fichier pour yt-dlp
-outputTemplate := filepath.Join(videoDir, "%(title)s_%(id)s.%(ext)s")
+outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
 
 // Check if yt-dlp is updated
 cmd := exec.Command("./yt-dlp", "-U")
