@@ -179,53 +179,53 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 
 	logrus.WithField("url", req.URL).Info("Début de téléchargement YouTube")
 
-// Nom de fichier pour yt-dlp
-outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
+	// Nom de fichier pour yt-dlp
+	outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
 
-// Check if yt-dlp is updated
-cmd := exec.Command("./yt-dlp", "-U")
-output, err := cmd.CombinedOutput()
-if err != nil {
-sendError(w, fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output), http.StatusInternalServerError)
-return
-}
+	// Check if yt-dlp is updated
+	cmd := exec.Command("./yt-dlp", "-U")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		sendError(w, fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output), http.StatusInternalServerError)
+		return
+	}
 
-// Appeler yt-dlp
-cmd = exec.Command("./yt-dlp",
-"-f", "best[ext=mp4]",
-"-o", outputTemplate,
-"--no-playlist",
-req.URL,
-)
+	// Appeler yt-dlp
+	cmd = exec.Command("./yt-dlp",
+		"-f", "best[ext=mp4]",
+		"-o", outputTemplate,
+		"--no-playlist",
+		req.URL,
+	)
 
-output, err = cmd.CombinedOutput()
-if err != nil {
-sendError(w, fmt.Sprintf("Erreur yt-dlp: %v\n%s", err, output), http.StatusInternalServerError)
-return
-}
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		sendError(w, fmt.Sprintf("Erreur yt-dlp: %v\n%s", err, output), http.StatusInternalServerError)
+		return
+	}
 
-// Méthode plus fiable: trouver le fichier le plus récemment modifié
-var newFileName string
-entries, err := os.ReadDir(videoDir)
-if err != nil {
-sendError(w, "Erreur lecture dossier videos après téléchargement", http.StatusInternalServerError)
-return
-}
+	// Méthode plus fiable: trouver le fichier le plus récemment modifié
+	var newFileName string
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		sendError(w, "Erreur lecture dossier videos après téléchargement", http.StatusInternalServerError)
+		return
+	}
 
-var newestTime time.Time
-for _, entry := range entries {
-if entry.IsDir() {
-continue
-}
-info, err := entry.Info()
-if err != nil {
-continue
-}
-if info.ModTime().After(newestTime) {
-newestTime = info.ModTime()
-newFileName = entry.Name()
-}
-}
+	var newestTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(newestTime) {
+			newestTime = info.ModTime()
+			newFileName = entry.Name()
+		}
+	}
 
 	logrus.WithFields(logrus.Fields{
 		"url":      req.URL,
@@ -263,91 +263,91 @@ func sendSuccess(w http.ResponseWriter, message string, filename string) {
 
 // verifyVideoAccessible vérifie qu'une vidéo est accessible via HTTP avant de lancer VLC
 func verifyVideoAccessible(videoPath string, maxRetries int) bool {
-for i := 0; i < maxRetries; i++ {
-logrus.WithFields(logrus.Fields{
-"video_path": videoPath,
-"attempt":    i + 1,
-"max_retries": maxRetries,
-}).Info("AUTO-PLAY - Vérification accessibilité vidéo")
+	for i := 0; i < maxRetries; i++ {
+		logrus.WithFields(logrus.Fields{
+			"video_path":  videoPath,
+			"attempt":     i + 1,
+			"max_retries": maxRetries,
+		}).Info("AUTO-PLAY - Vérification accessibilité vidéo")
 
-resp, err := http.Head(videoPath)
-if err == nil && resp.StatusCode == http.StatusOK {
-logrus.WithFields(logrus.Fields{
-"video_path": videoPath,
-"attempt":    i + 1,
-}).Info("AUTO-PLAY - Vidéo accessible via HTTP")
-return true
-}
+		resp, err := http.Head(videoPath)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			logrus.WithFields(logrus.Fields{
+				"video_path": videoPath,
+				"attempt":    i + 1,
+			}).Info("AUTO-PLAY - Vidéo accessible via HTTP")
+			return true
+		}
 
-if err != nil {
-logrus.WithFields(logrus.Fields{
-"video_path": videoPath,
-"attempt":    i + 1,
-"error":      err.Error(),
-}).Warn("AUTO-PLAY - Erreur vérification HTTP")
-} else {
-logrus.WithFields(logrus.Fields{
-"video_path": videoPath,
-"attempt":    i + 1,
-"status":     resp.StatusCode,
-}).Warn("AUTO-PLAY - Vidéo pas encore accessible")
-}
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"video_path": videoPath,
+				"attempt":    i + 1,
+				"error":      err.Error(),
+			}).Warn("AUTO-PLAY - Erreur vérification HTTP")
+		} else {
+			logrus.WithFields(logrus.Fields{
+				"video_path": videoPath,
+				"attempt":    i + 1,
+				"status":     resp.StatusCode,
+			}).Warn("AUTO-PLAY - Vidéo pas encore accessible")
+		}
 
-// Attendre avant le prochain essai (backoff exponentiel)
-waitTime := time.Duration(500*(i+1)) * time.Millisecond
-time.Sleep(waitTime)
-}
+		// Attendre avant le prochain essai (backoff exponentiel)
+		waitTime := time.Duration(500*(i+1)) * time.Millisecond
+		time.Sleep(waitTime)
+	}
 
-logrus.WithFields(logrus.Fields{
-"video_path": videoPath,
-"max_retries": maxRetries,
-}).Error("AUTO-PLAY - Vidéo toujours pas accessible après tous les essais")
-return false
+	logrus.WithFields(logrus.Fields{
+		"video_path":  videoPath,
+		"max_retries": maxRetries,
+	}).Error("AUTO-PLAY - Vidéo toujours pas accessible après tous les essais")
+	return false
 }
 
 // autoPlayVideo lance automatiquement une vidéo sur VLC si une session authentifiée existe
 func autoPlayVideo(filename string, vlcUrl string, backendUrl string) {
-if filename == "" || vlcUrl == "" {
-return
-}
+	if filename == "" || vlcUrl == "" {
+		return
+	}
 
-logrus.WithFields(logrus.Fields{
-"filename": filename,
-"vlc_url":  vlcUrl,
-}).Info("AUTO-PLAY - Tentative de lecture automatique")
+	logrus.WithFields(logrus.Fields{
+		"filename": filename,
+		"vlc_url":  vlcUrl,
+	}).Info("AUTO-PLAY - Tentative de lecture automatique")
 
-// Vérifier si une session VLC authentifiée existe
-vlcSessionsMutex.RLock()
-session, exists := vlcSessions[vlcUrl]
-vlcSessionsMutex.RUnlock()
+	// Vérifier si une session VLC authentifiée existe
+	vlcSessionsMutex.RLock()
+	session, exists := vlcSessions[vlcUrl]
+	vlcSessionsMutex.RUnlock()
 
-if !exists || !session.Authenticated {
-logrus.WithField("vlc_url", vlcUrl).Warn("AUTO-PLAY - Pas de session VLC authentifiée")
-return
-}
+	if !exists || !session.Authenticated {
+		logrus.WithField("vlc_url", vlcUrl).Warn("AUTO-PLAY - Pas de session VLC authentifiée")
+		return
+	}
 
-// Construire l'URL de la vidéo avec proper path encoding
-// Utiliser PathEscape pour les chemins URL (pas QueryEscape)
-encodedFilename := url.PathEscape(filename)
-videoPath := backendUrl + "/videos/" + encodedFilename
+	// Construire l'URL de la vidéo avec proper path encoding
+	// Utiliser PathEscape pour les chemins URL (pas QueryEscape)
+	encodedFilename := url.PathEscape(filename)
+	videoPath := backendUrl + "/videos/" + encodedFilename
 
-// Vérifier que la vidéo est accessible via HTTP avant de contacter VLC
-// Extended wait time for debugging timing issues
-if !verifyVideoAccessible(videoPath, 60) {
-logrus.WithFields(logrus.Fields{
-"filename":   filename,
-"video_path": videoPath,
-}).Error("AUTO-PLAY - Vidéo non accessible, annulation auto-play")
-return
-}
+	// Vérifier que la vidéo est accessible via HTTP avant de contacter VLC
+	// Extended wait time for debugging timing issues
+	if !verifyVideoAccessible(videoPath, 60) {
+		logrus.WithFields(logrus.Fields{
+			"filename":   filename,
+			"video_path": videoPath,
+		}).Error("AUTO-PLAY - Vidéo non accessible, annulation auto-play")
+		return
+	}
 
-baseUrl, _ := url.Parse(vlcUrl + "/play")
-queryParams := baseUrl.Query()
-queryParams.Set("id", "-1")
-queryParams.Set("path", videoPath)
-queryParams.Set("type", "stream")
-baseUrl.RawQuery = queryParams.Encode()
-playUrl := baseUrl.String()
+	baseUrl, _ := url.Parse(vlcUrl + "/play")
+	queryParams := baseUrl.Query()
+	queryParams.Set("id", "-1")
+	queryParams.Set("path", videoPath)
+	queryParams.Set("type", "stream")
+	baseUrl.RawQuery = queryParams.Encode()
+	playUrl := baseUrl.String()
 
 	logrus.WithFields(logrus.Fields{
 		"filename": filename,
@@ -385,45 +385,45 @@ playUrl := baseUrl.String()
 }
 
 func listHandler(w http.ResponseWriter, r *http.Request) {
-entries, err := os.ReadDir(videoDir)
-if err != nil {
-sendError(w, "Impossible de lister les vidéos", http.StatusInternalServerError)
-return
-}
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		sendError(w, "Impossible de lister les vidéos", http.StatusInternalServerError)
+		return
+	}
 
-// Structure pour trier par date de modification
-type fileWithTime struct {
-name    string
-modTime time.Time
-}
+	// Structure pour trier par date de modification
+	type fileWithTime struct {
+		name    string
+		modTime time.Time
+	}
 
-var filesWithTime []fileWithTime
-for _, entry := range entries {
-if !entry.IsDir() {
-info, err := entry.Info()
-if err != nil {
-continue
-}
-filesWithTime = append(filesWithTime, fileWithTime{
-name:    entry.Name(),
-modTime: info.ModTime(),
-})
-}
-}
+	var filesWithTime []fileWithTime
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			filesWithTime = append(filesWithTime, fileWithTime{
+				name:    entry.Name(),
+				modTime: info.ModTime(),
+			})
+		}
+	}
 
-// Trier par date de modification (plus récent en premier)
-sort.Slice(filesWithTime, func(i, j int) bool {
-return filesWithTime[i].modTime.After(filesWithTime[j].modTime)
-})
+	// Trier par date de modification (plus récent en premier)
+	sort.Slice(filesWithTime, func(i, j int) bool {
+		return filesWithTime[i].modTime.After(filesWithTime[j].modTime)
+	})
 
-// Extraire juste les noms de fichiers
-var files []string
-for _, f := range filesWithTime {
-files = append(files, f.name)
-}
+	// Extraire juste les noms de fichiers
+	var files []string
+	for _, f := range filesWithTime {
+		files = append(files, f.name)
+	}
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(files)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(files)
 }
 
 func pruneVideos() {
