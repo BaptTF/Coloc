@@ -327,19 +327,28 @@ async function download(endpoint, buttonText) {
   buttons.forEach(btn => btn.disabled = true);
   showMessage('Téléchargement en cours...', 'info');
   try {
+    // Send auto-play info to server
+    const requestData = {
+      url: url,
+      autoPlay: autoPlayCheckbox.checked,
+      vlcUrl: vlcUrlInput.value,
+      backendUrl: backendUrlInput.value
+    };
+    
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url })
+      body: JSON.stringify(requestData)
     });
     const data = await response.json();
     if (data.success) {
-      showMessage('✓ ' + data.message + (data.file ? ' - ' + data.file : ''), 'success');
+      let message = '✓ ' + data.message + (data.file ? ' - ' + data.file : '');
+      if (autoPlayCheckbox.checked && data.file) {
+        message += ' 🎬 Auto-play en cours...';
+      }
+      showMessage(message, 'success');
       urlInput.value = '';
       listVideos();
-      if (autoPlayCheckbox.checked && data.file) {
-        playVideo(data.file);
-      }
     } else {
       showMessage('✗ ' + data.message, 'error');
     }
@@ -385,12 +394,20 @@ async function testVLCConnection() {
 
 async function listVideos() {
   try {
-    const files = await fetch(backendUrlInput.value + '/list').then(res => res.json());
+    const response = await fetch(backendUrlInput.value + '/list');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const files = await response.json();
     videosListDiv.innerHTML = '';
-    if (files.length === 0) {
+    
+    // Check if files is null, undefined, or not an array
+    if (!files || !Array.isArray(files) || files.length === 0) {
       videosListDiv.innerHTML = '<p style="text-align:center;color:#666;">Aucune vidéo disponible</p>';
       return;
     }
+    
     files.forEach(filename => {
       const card = document.createElement('div');
       card.className = 'video-card';
@@ -409,7 +426,7 @@ async function listVideos() {
     });
   } catch (err) {
     console.error('Erreur listVideos:', err);
-    videosListDiv.innerHTML = '<p style="text-align:center;color:#f44336;">Erreur de chargement</p>';
+    videosListDiv.innerHTML = '<p style="text-align:center;color:#f44336;">Erreur de chargement: ' + err.message + '</p>';
   }
 }
 

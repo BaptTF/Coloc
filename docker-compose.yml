@@ -1,0 +1,14 @@
+
+services:
+  video-server:
+    build: .
+    container_name: video-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persister les vidéos téléchargées
+      - ./videos:/videos
+    environment:
+      # Variables d'environnement pour la configuration
+      - LOG_LEVEL=info

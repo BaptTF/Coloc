@@ -1,0 +1,40 @@
+# Fichiers et dossiers à ignorer lors du build Docker
+
+# Fichiers de développement
+*.md
+.git
+.gitignore
+.vscode
+.idea
+
+# Fichiers de test
+test*.py
+*_test.go
+
+# Binaires et logs
+video-server
+*.log
+logs/
+
+# Vidéos (seront montées en volume)
+videos/
+*.mp4
+*.mkv
+*.avi
+
+# Docker files
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Node modules (si jamais utilisé)
+node_modules/

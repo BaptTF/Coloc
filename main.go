@@ -1,24 +1,24 @@
 package main
 
 import (
-"crypto/sha256"
-_ "embed"
-"encoding/hex"
-"encoding/json"
-"fmt"
-"io"
-"net/http"
-"net/http/cookiejar"
-"net/url"
-"os"
-"os/exec"
-"path/filepath"
-"sort"
-"strings"
-"sync"
-"time"
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
-"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 //go:embed index.html
@@ -28,11 +28,11 @@ const videoDir = "./videos"
 
 // Structure pour maintenir les sessions VLC
 type VLCSession struct {
-Challenge     string
-Client        *http.Client
-URL           string
-Authenticated bool
-LastActivity  time.Time
+	Challenge     string
+	Client        *http.Client
+	URL           string
+	Authenticated bool
+	LastActivity  time.Time
 }
 
 // Map pour stocker les sessions VLC par URL
@@ -41,13 +41,16 @@ var vlcSessionsMutex sync.RWMutex
 
 // Configuration VLC persistante
 type VLCConfig struct {
-URL           string `json:"url"`
-Authenticated bool   `json:"authenticated"`
-LastActivity  string `json:"last_activity"`
+	URL           string `json:"url"`
+	Authenticated bool   `json:"authenticated"`
+	LastActivity  string `json:"last_activity"`
 }
 
 type URLRequest struct {
-	URL string `json:"url"`
+	URL        string `json:"url"`
+	AutoPlay   bool   `json:"autoPlay,omitempty"`
+	VLCUrl     string `json:"vlcUrl,omitempty"`
+	BackendUrl string `json:"backendUrl,omitempty"`
 }
 
 type Response struct {
@@ -74,11 +77,11 @@ func main() {
 	http.HandleFunc("/url", downloadURLHandler)
 	http.HandleFunc("/urlyt", downloadYouTubeHandler)
 	http.HandleFunc("/list", listHandler)
-http.HandleFunc("/vlc/code", vlcCodeHandler)
-http.HandleFunc("/vlc/verify-code", vlcVerifyHandler)
-http.HandleFunc("/vlc/play", vlcPlayHandler)
-http.HandleFunc("/vlc/status", vlcStatusHandler)
-http.HandleFunc("/vlc/config", vlcConfigHandler)
+	http.HandleFunc("/vlc/code", vlcCodeHandler)
+	http.HandleFunc("/vlc/verify-code", vlcVerifyHandler)
+	http.HandleFunc("/vlc/play", vlcPlayHandler)
+	http.HandleFunc("/vlc/status", vlcStatusHandler)
+	http.HandleFunc("/vlc/config", vlcConfigHandler)
 
 	logrus.Info("Serveur démarré sur http://localhost:8080")
 	logrus.Fatal(http.ListenAndServe(":8080", nil))
@@ -144,7 +147,13 @@ func downloadURLHandler(w http.ResponseWriter, r *http.Request) {
 	logrus.WithFields(logrus.Fields{
 		"filename": filename,
 		"url":      req.URL,
+		"autoplay": req.AutoPlay,
 	}).Info("Vidéo téléchargée avec succès")
+
+	// Auto-play si demandé
+	if req.AutoPlay && req.VLCUrl != "" && req.BackendUrl != "" {
+		go autoPlayVideo(filename, req.VLCUrl, req.BackendUrl)
+	}
 
 	sendSuccess(w, "Vidéo téléchargée avec succès", filename)
 	pruneVideos()
@@ -170,37 +179,67 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 
 	logrus.WithField("url", req.URL).Info("Début de téléchargement YouTube")
 
-	// Nom de fichier pour yt-dlp
-	outputTemplate := filepath.Join(videoDir, "%(title)s_%(id)s.%(ext)s")
+// Nom de fichier pour yt-dlp
+outputTemplate := filepath.Join(videoDir, "%(title)s_%(id)s.%(ext)s")
 
-	// Check if yt-dlp is updated
-	cmd := exec.Command("./yt-dlp", "-U")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		sendError(w, fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output), http.StatusInternalServerError)
-		return
-	}
+// Check if yt-dlp is updated
+cmd := exec.Command("./yt-dlp", "-U")
+output, err := cmd.CombinedOutput()
+if err != nil {
+sendError(w, fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output), http.StatusInternalServerError)
+return
+}
 
-	// Appeler yt-dlp
-	cmd = exec.Command("./yt-dlp",
-		"-f", "best[ext=mp4]",
-		"-o", outputTemplate,
-		"--no-playlist",
-		req.URL,
-	)
+// Appeler yt-dlp
+cmd = exec.Command("./yt-dlp",
+"-f", "best[ext=mp4]",
+"-o", outputTemplate,
+"--no-playlist",
+req.URL,
+)
 
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		sendError(w, fmt.Sprintf("Erreur yt-dlp: %v\n%s", err, output), http.StatusInternalServerError)
-		return
-	}
+output, err = cmd.CombinedOutput()
+if err != nil {
+sendError(w, fmt.Sprintf("Erreur yt-dlp: %v\n%s", err, output), http.StatusInternalServerError)
+return
+}
+
+// Méthode plus fiable: trouver le fichier le plus récemment modifié
+var newFileName string
+entries, err := os.ReadDir(videoDir)
+if err != nil {
+sendError(w, "Erreur lecture dossier videos après téléchargement", http.StatusInternalServerError)
+return
+}
+
+var newestTime time.Time
+for _, entry := range entries {
+if entry.IsDir() {
+continue
+}
+info, err := entry.Info()
+if err != nil {
+continue
+}
+if info.ModTime().After(newestTime) {
+newestTime = info.ModTime()
+newFileName = entry.Name()
+}
+}
 
 	logrus.WithFields(logrus.Fields{
-		"url":    req.URL,
-		"output": string(output),
+		"url":      req.URL,
+		"output":   string(output),
+		"new_file": newFileName,
+		"autoplay": req.AutoPlay,
 	}).Info("Vidéo YouTube téléchargée avec succès")
 
-	sendSuccess(w, "Vidéo YouTube téléchargée avec succès", "")
+	// Auto-play si demandé
+	if req.AutoPlay && req.VLCUrl != "" && req.BackendUrl != "" && newFileName != "" {
+		go autoPlayVideo(newFileName, req.VLCUrl, req.BackendUrl)
+	}
+
+	sendSuccess(w, "Vidéo YouTube téléchargée avec succès", newFileName)
 	pruneVideos()
 }
 
@@ -222,21 +261,169 @@ func sendSuccess(w http.ResponseWriter, message string, filename string) {
 	})
 }
 
-func listHandler(w http.ResponseWriter, r *http.Request) {
-	entries, err := os.ReadDir(videoDir)
+// verifyVideoAccessible vérifie qu'une vidéo est accessible via HTTP avant de lancer VLC
+func verifyVideoAccessible(videoPath string, maxRetries int) bool {
+for i := 0; i < maxRetries; i++ {
+logrus.WithFields(logrus.Fields{
+"video_path": videoPath,
+"attempt":    i + 1,
+"max_retries": maxRetries,
+}).Info("AUTO-PLAY - Vérification accessibilité vidéo")
+
+resp, err := http.Head(videoPath)
+if err == nil && resp.StatusCode == http.StatusOK {
+logrus.WithFields(logrus.Fields{
+"video_path": videoPath,
+"attempt":    i + 1,
+}).Info("AUTO-PLAY - Vidéo accessible via HTTP")
+return true
+}
+
+if err != nil {
+logrus.WithFields(logrus.Fields{
+"video_path": videoPath,
+"attempt":    i + 1,
+"error":      err.Error(),
+}).Warn("AUTO-PLAY - Erreur vérification HTTP")
+} else {
+logrus.WithFields(logrus.Fields{
+"video_path": videoPath,
+"attempt":    i + 1,
+"status":     resp.StatusCode,
+}).Warn("AUTO-PLAY - Vidéo pas encore accessible")
+}
+
+// Attendre avant le prochain essai (backoff exponentiel)
+waitTime := time.Duration(500*(i+1)) * time.Millisecond
+time.Sleep(waitTime)
+}
+
+logrus.WithFields(logrus.Fields{
+"video_path": videoPath,
+"max_retries": maxRetries,
+}).Error("AUTO-PLAY - Vidéo toujours pas accessible après tous les essais")
+return false
+}
+
+// autoPlayVideo lance automatiquement une vidéo sur VLC si une session authentifiée existe
+func autoPlayVideo(filename string, vlcUrl string, backendUrl string) {
+if filename == "" || vlcUrl == "" {
+return
+}
+
+logrus.WithFields(logrus.Fields{
+"filename": filename,
+"vlc_url":  vlcUrl,
+}).Info("AUTO-PLAY - Tentative de lecture automatique")
+
+// Vérifier si une session VLC authentifiée existe
+vlcSessionsMutex.RLock()
+session, exists := vlcSessions[vlcUrl]
+vlcSessionsMutex.RUnlock()
+
+if !exists || !session.Authenticated {
+logrus.WithField("vlc_url", vlcUrl).Warn("AUTO-PLAY - Pas de session VLC authentifiée")
+return
+}
+
+// Construire l'URL de la vidéo avec proper path encoding
+// Utiliser PathEscape pour les chemins URL (pas QueryEscape)
+encodedFilename := url.PathEscape(filename)
+videoPath := backendUrl + "/videos/" + encodedFilename
+
+// Vérifier que la vidéo est accessible via HTTP avant de contacter VLC
+// Extended wait time for debugging timing issues
+if !verifyVideoAccessible(videoPath, 60) {
+logrus.WithFields(logrus.Fields{
+"filename":   filename,
+"video_path": videoPath,
+}).Error("AUTO-PLAY - Vidéo non accessible, annulation auto-play")
+return
+}
+
+baseUrl, _ := url.Parse(vlcUrl + "/play")
+queryParams := baseUrl.Query()
+queryParams.Set("id", "-1")
+queryParams.Set("path", videoPath)
+queryParams.Set("type", "stream")
+baseUrl.RawQuery = queryParams.Encode()
+playUrl := baseUrl.String()
+
+	logrus.WithFields(logrus.Fields{
+		"filename": filename,
+		"vlc_url":  vlcUrl,
+		"play_url": playUrl,
+	}).Info("AUTO-PLAY - Envoi commande lecture à VLC")
+
+	// Créer la requête
+	req, err := http.NewRequest("GET", playUrl, nil)
 	if err != nil {
-		sendError(w, "Impossible de lister les vidéos", http.StatusInternalServerError)
+		logrus.WithError(err).Error("AUTO-PLAY - Erreur création requête")
 		return
 	}
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
-		}
+
+	// Utiliser le client de la session pour maintenir l'authentification
+	resp, err := session.Client.Do(req)
+	if err != nil {
+		logrus.WithError(err).Error("AUTO-PLAY - Erreur connexion VLC")
+		return
 	}
-	sort.Strings(files)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		logrus.WithFields(logrus.Fields{
+			"filename": filename,
+			"vlc_url":  vlcUrl,
+		}).Info("AUTO-PLAY - Lecture automatique réussie")
+	} else {
+		logrus.WithFields(logrus.Fields{
+			"filename": filename,
+			"vlc_url":  vlcUrl,
+			"status":   resp.StatusCode,
+		}).Warn("AUTO-PLAY - Échec lecture automatique")
+	}
+}
+
+func listHandler(w http.ResponseWriter, r *http.Request) {
+entries, err := os.ReadDir(videoDir)
+if err != nil {
+sendError(w, "Impossible de lister les vidéos", http.StatusInternalServerError)
+return
+}
+
+// Structure pour trier par date de modification
+type fileWithTime struct {
+name    string
+modTime time.Time
+}
+
+var filesWithTime []fileWithTime
+for _, entry := range entries {
+if !entry.IsDir() {
+info, err := entry.Info()
+if err != nil {
+continue
+}
+filesWithTime = append(filesWithTime, fileWithTime{
+name:    entry.Name(),
+modTime: info.ModTime(),
+})
+}
+}
+
+// Trier par date de modification (plus récent en premier)
+sort.Slice(filesWithTime, func(i, j int) bool {
+return filesWithTime[i].modTime.After(filesWithTime[j].modTime)
+})
+
+// Extraire juste les noms de fichiers
+var files []string
+for _, f := range filesWithTime {
+files = append(files, f.name)
+}
+
+w.Header().Set("Content-Type", "application/json")
+json.NewEncoder(w).Encode(files)
 }
 
 func pruneVideos() {
@@ -285,15 +472,15 @@ func vlcCodeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	client := &http.Client{Jar: jar}
 
-// Selon test.py, il faut faire un POST avec form data: challenge=""
-formData := url.Values{}
-formData.Set("challenge", "")
-logrus.WithFields(logrus.Fields{
-"vlc_url": vlcUrl,
-"data":    formData.Encode(),
-}).Info("VLC CODE - Envoi vers VLC")
+	// Selon test.py, il faut faire un POST avec form data: challenge=""
+	formData := url.Values{}
+	formData.Set("challenge", "")
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcUrl,
+		"data":    formData.Encode(),
+	}).Info("VLC CODE - Envoi vers VLC")
 
-resp, err := client.Post(vlcUrl+"/code", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	resp, err := client.Post(vlcUrl+"/code", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"vlc_url": vlcUrl,
@@ -410,16 +597,16 @@ func vlcVerifyHandler(w http.ResponseWriter, r *http.Request) {
 		"hash_length":   len(hashHex),
 	}).Info("VLC VERIFY - Hash calculé côté serveur")
 
-// Selon test.py, VLC attend form data: code=<hash>
-formData := url.Values{}
-formData.Set("code", hashHex)
+	// Selon test.py, VLC attend form data: code=<hash>
+	formData := url.Values{}
+	formData.Set("code", hashHex)
 
-logrus.WithFields(logrus.Fields{
-"vlc_url": vlcUrl,
-"data":    formData.Encode(),
-}).Info("VLC VERIFY - Envoi vers VLC")
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcUrl,
+		"data":    formData.Encode(),
+	}).Info("VLC VERIFY - Envoi vers VLC")
 
-resp, err := session.Client.Post(vlcUrl+"/verify-code", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	resp, err := session.Client.Post(vlcUrl+"/verify-code", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"vlc_url": vlcUrl,
@@ -446,97 +633,97 @@ resp, err := session.Client.Post(vlcUrl+"/verify-code", "application/x-www-form-
 		"response": string(respBody),
 	}).Info("VLC VERIFY - Réponse VLC")
 
-// Si l'authentification réussit, mettre à jour la session
-if resp.StatusCode == http.StatusOK {
-vlcSessionsMutex.Lock()
-session.Authenticated = true
-session.LastActivity = time.Now()
-vlcSessionsMutex.Unlock()
-logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Authentification réussie, session maintenue")
-}
+	// Si l'authentification réussit, mettre à jour la session
+	if resp.StatusCode == http.StatusOK {
+		vlcSessionsMutex.Lock()
+		session.Authenticated = true
+		session.LastActivity = time.Now()
+		vlcSessionsMutex.Unlock()
+		logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Authentification réussie, session maintenue")
+	}
 
-w.Header().Set("Content-Type", "application/json")
-w.WriteHeader(resp.StatusCode)
-w.Write(respBody)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
 }
 
 // vlcStatusHandler retourne l'état d'authentification pour une URL VLC
 func vlcStatusHandler(w http.ResponseWriter, r *http.Request) {
-vlcUrl := r.URL.Query().Get("vlc")
-if vlcUrl == "" {
-sendError(w, "Paramètre vlc manquant", http.StatusBadRequest)
-return
-}
+	vlcUrl := r.URL.Query().Get("vlc")
+	if vlcUrl == "" {
+		sendError(w, "Paramètre vlc manquant", http.StatusBadRequest)
+		return
+	}
 
-vlcSessionsMutex.RLock()
-session, exists := vlcSessions[vlcUrl]
-vlcSessionsMutex.RUnlock()
+	vlcSessionsMutex.RLock()
+	session, exists := vlcSessions[vlcUrl]
+	vlcSessionsMutex.RUnlock()
 
-config := VLCConfig{
-URL:           vlcUrl,
-Authenticated: exists && session.Authenticated,
-}
+	config := VLCConfig{
+		URL:           vlcUrl,
+		Authenticated: exists && session.Authenticated,
+	}
 
-if exists {
-config.LastActivity = session.LastActivity.Format(time.RFC3339)
-}
+	if exists {
+		config.LastActivity = session.LastActivity.Format(time.RFC3339)
+	}
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(config)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
 }
 
 // vlcConfigHandler gère la configuration VLC (GET pour récupérer, POST pour définir)
 func vlcConfigHandler(w http.ResponseWriter, r *http.Request) {
-switch r.Method {
-case http.MethodGet:
-// Récupérer toutes les sessions VLC actives
-vlcSessionsMutex.RLock()
-configs := make([]VLCConfig, 0, len(vlcSessions))
-for url, session := range vlcSessions {
-configs = append(configs, VLCConfig{
-URL:           url,
-Authenticated: session.Authenticated,
-LastActivity:  session.LastActivity.Format(time.RFC3339),
-})
-}
-vlcSessionsMutex.RUnlock()
+	switch r.Method {
+	case http.MethodGet:
+		// Récupérer toutes les sessions VLC actives
+		vlcSessionsMutex.RLock()
+		configs := make([]VLCConfig, 0, len(vlcSessions))
+		for url, session := range vlcSessions {
+			configs = append(configs, VLCConfig{
+				URL:           url,
+				Authenticated: session.Authenticated,
+				LastActivity:  session.LastActivity.Format(time.RFC3339),
+			})
+		}
+		vlcSessionsMutex.RUnlock()
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(configs)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(configs)
 
-case http.MethodPost:
-// Définir une nouvelle URL VLC (sans authentification)
-var config VLCConfig
-if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
-sendError(w, "JSON invalide", http.StatusBadRequest)
-return
-}
+	case http.MethodPost:
+		// Définir une nouvelle URL VLC (sans authentification)
+		var config VLCConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			sendError(w, "JSON invalide", http.StatusBadRequest)
+			return
+		}
 
-if config.URL == "" {
-sendError(w, "URL VLC manquante", http.StatusBadRequest)
-return
-}
+		if config.URL == "" {
+			sendError(w, "URL VLC manquante", http.StatusBadRequest)
+			return
+		}
 
-// Créer une nouvelle session non authentifiée
-vlcSessionsMutex.Lock()
-vlcSessions[config.URL] = &VLCSession{
-URL:          config.URL,
-Authenticated: false,
-LastActivity: time.Now(),
-}
-vlcSessionsMutex.Unlock()
+		// Créer une nouvelle session non authentifiée
+		vlcSessionsMutex.Lock()
+		vlcSessions[config.URL] = &VLCSession{
+			URL:           config.URL,
+			Authenticated: false,
+			LastActivity:  time.Now(),
+		}
+		vlcSessionsMutex.Unlock()
 
-logrus.WithField("vlc_url", config.URL).Info("VLC CONFIG - Nouvelle URL VLC définie")
+		logrus.WithField("vlc_url", config.URL).Info("VLC CONFIG - Nouvelle URL VLC définie")
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(Response{
-Success: true,
-Message: "URL VLC définie",
-})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Response{
+			Success: true,
+			Message: "URL VLC définie",
+		})
 
-default:
-sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
-}
+	default:
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+	}
 }
 
 func vlcPlayHandler(w http.ResponseWriter, r *http.Request) {
