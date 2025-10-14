@@ -24,6 +24,12 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
+//go:embed styles.css
+var stylesCSS []byte
+
+//go:embed app.js
+var appJS []byte
+
 const videoDir = "./videos"
 
 // Structure pour maintenir les sessions VLC
@@ -74,6 +80,8 @@ func main() {
 	http.Handle("/videos/", http.StripPrefix("/videos/", fs))
 
 	http.HandleFunc("/", homeHandler)
+	http.HandleFunc("/styles.css", stylesHandler)
+	http.HandleFunc("/app.js", appHandler)
 	http.HandleFunc("/url", downloadURLHandler)
 	http.HandleFunc("/urlyt", downloadYouTubeHandler)
 	http.HandleFunc("/list", listHandler)
@@ -90,6 +98,18 @@ func main() {
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(indexHTML)
+}
+
+func stylesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Write(stylesCSS)
+}
+
+func appHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Write(appJS)
 }
 
 // downloadURLHandler télécharge une vidéo depuis une URL directe
