@@ -15,8 +15,11 @@ RUN apk add --no-cache curl ca-certificates \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /yt-dlp \
     && chmod +x /yt-dlp
 
-# Stage 3: Final scratch image
-FROM python:latest
+# Stage 3: Final minimal image with ffmpeg
+FROM python:3.12-alpine
+
+# Install ffmpeg and clean up in single layer to minimize image size
+RUN apk add --no-cache ffmpeg
 
 # Copy the Go binary
 COPY --from=builder /app/video-server /video-server
