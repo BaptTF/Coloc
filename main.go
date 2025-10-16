@@ -1,24 +1,28 @@
 package main
 
 import (
-	"crypto/sha256"
-	_ "embed"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/cookiejar"
-	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"sort"
-	"strings"
-	"sync"
-	"time"
+"bufio"
+"crypto/sha256"
+_ "embed"
+"encoding/hex"
+"encoding/json"
+"fmt"
+"io"
+"net/http"
+"net/http/cookiejar"
+"net/url"
+"os"
+"os/exec"
+"path/filepath"
+"regexp"
+"sort"
+"strconv"
+"strings"
+"sync"
+"time"
 
-	"github.com/sirupsen/logrus"
+"github.com/gorilla/websocket"
+"github.com/sirupsen/logrus"
 )
 
 //go:embed index.html
@@ -34,11 +38,11 @@ const videoDir = "./videos"
 
 // Structure pour maintenir les sessions VLC
 type VLCSession struct {
-	Challenge     string
-	Client        *http.Client
-	URL           string
-	Authenticated bool
-	LastActivity  time.Time
+Challenge     string
+Client        *http.Client
+URL           string
+Authenticated bool
+LastActivity  time.Time
 }
 
 // Map pour stocker les sessions VLC par URL
@@ -47,52 +51,103 @@ var vlcSessionsMutex sync.RWMutex
 
 // Configuration VLC persistante
 type VLCConfig struct {
-	URL           string `json:"url"`
-	Authenticated bool   `json:"authenticated"`
-	LastActivity  string `json:"last_activity"`
+URL           string `json:"url"`
+Authenticated bool   `json:"authenticated"`
+LastActivity  string `json:"last_activity"`
 }
 
 type URLRequest struct {
-	URL        string `json:"url"`
-	AutoPlay   bool   `json:"autoPlay,omitempty"`
-	VLCUrl     string `json:"vlcUrl,omitempty"`
-	BackendUrl string `json:"backendUrl,omitempty"`
+URL        string `json:"url"`
+AutoPlay   bool   `json:"autoPlay,omitempty"`
+VLCUrl     string `json:"vlcUrl,omitempty"`
+BackendUrl string `json:"backendUrl,omitempty"`
 }
 
 type Response struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	File    string `json:"file,omitempty"`
+Success bool   `json:"success"`
+Message string `json:"message"`
+File    string `json:"file,omitempty"`
 }
 
+// WebSocket structures
+type WSMessage struct {
+Type       string  `json:"type"`
+DownloadID string  `json:"downloadId,omitempty"`
+Line       string  `json:"line,omitempty"`
+Percent    float64 `json:"percent,omitempty"`
+File       string  `json:"file,omitempty"`
+Message    string  `json:"message,omitempty"`
+Videos     []string `json:"videos,omitempty"`
+}
+
+type WSClientMessage struct {
+Action     string `json:"action"`
+DownloadID string `json:"downloadId,omitempty"`
+}
+
+type WSClient struct {
+conn   *websocket.Conn
+mu     sync.Mutex
+}
+
+// Download queue structures
+type DownloadJob struct {
+ID             string
+URL            string
+OutputTemplate string
+AutoPlay       bool
+VLCUrl         string
+BackendUrl     string
+CreatedAt      time.Time
+}
+
+// Global variables for download system
+var (
+downloadJobs = make(chan *DownloadJob, 100)
+wsClients = make(map[*WSClient]bool)
+wsClientsMutex sync.RWMutex
+subscribers = make(map[string]map[*WSClient]bool) // downloadId -> clients
+subscribersMutex sync.RWMutex
+upgrader = websocket.Upgrader{
+CheckOrigin: func(r *http.Request) bool {
+return true // Allow all origins for development
+},
+}
+percentRegex = regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
+)
+
 func main() {
-	// Configure logrus
-	logrus.SetFormatter(&logrus.JSONFormatter{})
-	logrus.SetLevel(logrus.InfoLevel)
+// Configure logrus
+logrus.SetFormatter(&logrus.JSONFormatter{})
+logrus.SetLevel(logrus.InfoLevel)
 
-	// Crée le dossier videos s'il n'existe pas
-	if err := os.MkdirAll(videoDir, 0755); err != nil {
-		logrus.Fatal(err)
-	}
+// Crée le dossier videos s'il n'existe pas
+if err := os.MkdirAll(videoDir, 0755); err != nil {
+logrus.Fatal(err)
+}
 
-	// Servir les vidéos en static
-	fs := http.FileServer(http.Dir(videoDir))
-	http.Handle("/videos/", http.StripPrefix("/videos/", fs))
+// Start download worker
+go downloadWorker()
 
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/styles.css", stylesHandler)
-	http.HandleFunc("/app.js", appHandler)
-	http.HandleFunc("/url", downloadURLHandler)
-	http.HandleFunc("/urlyt", downloadYouTubeHandler)
-	http.HandleFunc("/list", listHandler)
-	http.HandleFunc("/vlc/code", vlcCodeHandler)
-	http.HandleFunc("/vlc/verify-code", vlcVerifyHandler)
-	http.HandleFunc("/vlc/play", vlcPlayHandler)
-	http.HandleFunc("/vlc/status", vlcStatusHandler)
-	http.HandleFunc("/vlc/config", vlcConfigHandler)
+// Servir les vidéos en static
+fs := http.FileServer(http.Dir(videoDir))
+http.Handle("/videos/", http.StripPrefix("/videos/", fs))
 
-	logrus.Info("Serveur démarré sur http://localhost:8080")
-	logrus.Fatal(http.ListenAndServe(":8080", nil))
+http.HandleFunc("/", homeHandler)
+http.HandleFunc("/styles.css", stylesHandler)
+http.HandleFunc("/app.js", appHandler)
+http.HandleFunc("/url", downloadURLHandler)
+http.HandleFunc("/urlyt", downloadYouTubeHandler)
+http.HandleFunc("/list", listHandler)
+http.HandleFunc("/ws", wsHandler)
+http.HandleFunc("/vlc/code", vlcCodeHandler)
+http.HandleFunc("/vlc/verify-code", vlcVerifyHandler)
+http.HandleFunc("/vlc/play", vlcPlayHandler)
+http.HandleFunc("/vlc/status", vlcStatusHandler)
+http.HandleFunc("/vlc/config", vlcConfigHandler)
+
+logrus.Info("Serveur démarré sur http://localhost:8080")
+logrus.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
@@ -179,88 +234,54 @@ func downloadURLHandler(w http.ResponseWriter, r *http.Request) {
 	pruneVideos()
 }
 
-// downloadYouTubeHandler télécharge une vidéo avec yt-dlp
+// downloadYouTubeHandler télécharge une vidéo avec yt-dlp via queue system
 func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
-		return
-	}
+if r.Method != http.MethodPost {
+sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+return
+}
 
-	var req URLRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendError(w, "JSON invalide", http.StatusBadRequest)
-		return
-	}
+var req URLRequest
+if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+sendError(w, "JSON invalide", http.StatusBadRequest)
+return
+}
 
-	if req.URL == "" {
-		sendError(w, "URL manquante", http.StatusBadRequest)
-		return
-	}
+if req.URL == "" {
+sendError(w, "URL manquante", http.StatusBadRequest)
+return
+}
 
-	logrus.WithField("url", req.URL).Info("Début de téléchargement YouTube")
+logrus.WithField("url", req.URL).Info("Ajout téléchargement YouTube à la file")
 
-	// Nom de fichier pour yt-dlp
-	outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
+// Generate unique download ID
+downloadID := generateDownloadID()
 
-	// Check if yt-dlp is updated
-	cmd := exec.Command("./yt-dlp", "-U")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		sendError(w, fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output), http.StatusInternalServerError)
-		return
-	}
+// Create download job
+job := &DownloadJob{
+ID:             downloadID,
+URL:            req.URL,
+OutputTemplate: filepath.Join(videoDir, "%(title)s.%(ext)s"),
+AutoPlay:       req.AutoPlay,
+VLCUrl:         req.VLCUrl,
+BackendUrl:     req.BackendUrl,
+CreatedAt:      time.Now(),
+}
 
-	// Appeler yt-dlp
-	cmd = exec.Command("./yt-dlp",
-		"-f", "best[ext=mp4]",
-		"-o", outputTemplate,
-		"--no-playlist",
-		req.URL,
-	)
+// Add job to queue (non-blocking)
+select {
+case downloadJobs <- job:
+logrus.WithFields(logrus.Fields{
+"downloadId": downloadID,
+"url":        req.URL,
+"autoplay":   req.AutoPlay,
+}).Info("Download job added to queue")
 
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		sendError(w, fmt.Sprintf("Erreur yt-dlp: %v\n%s", err, output), http.StatusInternalServerError)
-		return
-	}
-
-	// Méthode plus fiable: trouver le fichier le plus récemment modifié
-	var newFileName string
-	entries, err := os.ReadDir(videoDir)
-	if err != nil {
-		sendError(w, "Erreur lecture dossier videos après téléchargement", http.StatusInternalServerError)
-		return
-	}
-
-	var newestTime time.Time
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(newestTime) {
-			newestTime = info.ModTime()
-			newFileName = entry.Name()
-		}
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"url":      req.URL,
-		"output":   string(output),
-		"new_file": newFileName,
-		"autoplay": req.AutoPlay,
-	}).Info("Vidéo YouTube téléchargée avec succès")
-
-	// Auto-play si demandé
-	if req.AutoPlay && req.VLCUrl != "" && req.BackendUrl != "" && newFileName != "" {
-		go autoPlayVideo(newFileName, req.VLCUrl, req.BackendUrl)
-	}
-
-	sendSuccess(w, "Vidéo YouTube téléchargée avec succès", newFileName)
-	pruneVideos()
+// Return immediately with download ID
+sendSuccess(w, fmt.Sprintf("Téléchargement ajouté à la file d'attente (ID: %s)", downloadID), downloadID)
+default:
+sendError(w, "File d'attente des téléchargements pleine, veuillez réessayer plus tard", http.StatusServiceUnavailable)
+}
 }
 
 func sendError(w http.ResponseWriter, message string, status int) {
@@ -538,11 +559,14 @@ func vlcCodeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	vlcSessionsMutex.Unlock()
 
-	logrus.WithField("vlc_url", vlcUrl).Info("VLC CODE - Session stockée")
+logrus.WithField("vlc_url", vlcUrl).Info("VLC CODE - Session stockée")
 
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+// Use sendSuccess/sendError instead of proxying raw response
+if resp.StatusCode == http.StatusOK {
+sendSuccess(w, "Challenge récupéré avec succès", challenge)
+} else {
+sendError(w, fmt.Sprintf("VLC response %d: %s", resp.StatusCode, strings.TrimSpace(challenge)), http.StatusBadGateway)
+}
 }
 
 func vlcVerifyHandler(w http.ResponseWriter, r *http.Request) {
@@ -653,18 +677,358 @@ func vlcVerifyHandler(w http.ResponseWriter, r *http.Request) {
 		"response": string(respBody),
 	}).Info("VLC VERIFY - Réponse VLC")
 
-	// Si l'authentification réussit, mettre à jour la session
-	if resp.StatusCode == http.StatusOK {
-		vlcSessionsMutex.Lock()
-		session.Authenticated = true
-		session.LastActivity = time.Now()
-		vlcSessionsMutex.Unlock()
-		logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Authentification réussie, session maintenue")
-	}
+// Si l'authentification réussit, mettre à jour la session
+if resp.StatusCode == http.StatusOK {
+vlcSessionsMutex.Lock()
+session.Authenticated = true
+session.LastActivity = time.Now()
+vlcSessionsMutex.Unlock()
+logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Authentification réussie, session maintenue")
+sendSuccess(w, "Authentification VLC réussie", "")
+} else {
+sendError(w, fmt.Sprintf("VLC response %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody))), http.StatusBadGateway)
+}
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
+// WebSocket handler
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+conn, err := upgrader.Upgrade(w, r, nil)
+if err != nil {
+logrus.WithError(err).Error("WebSocket upgrade failed")
+return
+}
+defer conn.Close()
+
+client := &WSClient{conn: conn}
+
+// Add client to global list
+wsClientsMutex.Lock()
+wsClients[client] = true
+wsClientsMutex.Unlock()
+
+// Remove client when done
+defer func() {
+wsClientsMutex.Lock()
+delete(wsClients, client)
+wsClientsMutex.Unlock()
+	
+// Remove from all subscriptions
+subscribersMutex.Lock()
+for downloadId := range subscribers {
+if clientMap, exists := subscribers[downloadId]; exists {
+delete(clientMap, client)
+if len(clientMap) == 0 {
+delete(subscribers, downloadId)
+}
+}
+}
+subscribersMutex.Unlock()
+}()
+
+logrus.Info("WebSocket client connected")
+
+// Handle incoming messages
+for {
+var msg WSClientMessage
+err := conn.ReadJSON(&msg)
+if err != nil {
+if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+logrus.WithError(err).Error("WebSocket read error")
+}
+break
+}
+
+logrus.WithFields(logrus.Fields{
+"action":     msg.Action,
+"downloadId": msg.DownloadID,
+}).Info("WebSocket message received")
+
+switch msg.Action {
+case "subscribe":
+if msg.DownloadID != "" {
+subscribersMutex.Lock()
+if subscribers[msg.DownloadID] == nil {
+subscribers[msg.DownloadID] = make(map[*WSClient]bool)
+}
+subscribers[msg.DownloadID][client] = true
+subscribersMutex.Unlock()
+logrus.WithField("downloadId", msg.DownloadID).Info("Client subscribed to download")
+}
+case "unsubscribe":
+if msg.DownloadID != "" {
+subscribersMutex.Lock()
+if clientMap, exists := subscribers[msg.DownloadID]; exists {
+delete(clientMap, client)
+if len(clientMap) == 0 {
+delete(subscribers, msg.DownloadID)
+}
+}
+subscribersMutex.Unlock()
+logrus.WithField("downloadId", msg.DownloadID).Info("Client unsubscribed from download")
+}
+case "list":
+// Send current video list
+files := getVideoList()
+response := WSMessage{
+Type:   "list",
+Videos: files,
+}
+client.send(response)
+case "subscribeAll":
+// Subscribe to all future downloads - we'll implement this by sending to all clients
+logrus.Info("Client subscribed to all downloads")
+}
+}
+}
+
+// Helper method to send message to WebSocket client
+func (c *WSClient) send(msg WSMessage) {
+c.mu.Lock()
+defer c.mu.Unlock()
+err := c.conn.WriteJSON(msg)
+if err != nil {
+logrus.WithError(err).Error("Failed to send WebSocket message")
+}
+}
+
+// Broadcast message to subscribers of a specific download
+func broadcastToSubscribers(downloadId string, msg WSMessage) {
+subscribersMutex.RLock()
+if clientMap, exists := subscribers[downloadId]; exists {
+for client := range clientMap {
+go client.send(msg)
+}
+}
+subscribersMutex.RUnlock()
+}
+
+// Broadcast message to all WebSocket clients
+func broadcastToAll(msg WSMessage) {
+wsClientsMutex.RLock()
+for client := range wsClients {
+go client.send(msg)
+}
+wsClientsMutex.RUnlock()
+}
+
+// Get current video list (helper function)
+func getVideoList() []string {
+entries, err := os.ReadDir(videoDir)
+if err != nil {
+return []string{}
+}
+
+type fileWithTime struct {
+name    string
+modTime time.Time
+}
+
+var filesWithTime []fileWithTime
+for _, entry := range entries {
+if !entry.IsDir() {
+info, err := entry.Info()
+if err != nil {
+continue
+}
+filesWithTime = append(filesWithTime, fileWithTime{
+name:    entry.Name(),
+modTime: info.ModTime(),
+})
+}
+}
+
+sort.Slice(filesWithTime, func(i, j int) bool {
+return filesWithTime[i].modTime.After(filesWithTime[j].modTime)
+})
+
+var files []string
+for _, f := range filesWithTime {
+files = append(files, f.name)
+}
+return files
+}
+
+// Download worker that processes the download queue
+func downloadWorker() {
+logrus.Info("Download worker started")
+for job := range downloadJobs {
+logrus.WithFields(logrus.Fields{
+"downloadId": job.ID,
+"url":        job.URL,
+}).Info("Processing download job")
+
+// Notify subscribers that download is starting
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "queued",
+DownloadID: job.ID,
+Message:    "Téléchargement en file d'attente",
+})
+
+// Check if yt-dlp is updated
+cmd := exec.Command("./yt-dlp", "-U")
+output, err := cmd.CombinedOutput()
+if err != nil {
+logrus.WithError(err).Error("yt-dlp update failed")
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "error",
+DownloadID: job.ID,
+Message:    fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output),
+})
+continue
+}
+
+// Execute yt-dlp with progress streaming
+cmd = exec.Command("./yt-dlp",
+"-f", "best[ext=mp4]",
+"-o", job.OutputTemplate,
+"--no-playlist",
+"--newline", // Force newline after each progress line
+job.URL,
+)
+
+// Get stdout and stderr pipes
+stdout, err := cmd.StdoutPipe()
+if err != nil {
+logrus.WithError(err).Error("Failed to get stdout pipe")
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "error",
+DownloadID: job.ID,
+Message:    fmt.Sprintf("Erreur création pipe: %v", err),
+})
+continue
+}
+
+stderr, err := cmd.StderrPipe()
+if err != nil {
+logrus.WithError(err).Error("Failed to get stderr pipe")
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "error",
+DownloadID: job.ID,
+Message:    fmt.Sprintf("Erreur création pipe stderr: %v", err),
+})
+continue
+}
+
+// Start the command
+err = cmd.Start()
+if err != nil {
+logrus.WithError(err).Error("Failed to start yt-dlp")
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "error",
+DownloadID: job.ID,
+Message:    fmt.Sprintf("Erreur démarrage yt-dlp: %v", err),
+})
+continue
+}
+
+// Stream stdout and stderr
+go streamOutput(job.ID, stdout, "stdout")
+go streamOutput(job.ID, stderr, "stderr")
+
+// Wait for command to complete
+err = cmd.Wait()
+if err != nil {
+logrus.WithError(err).Error("yt-dlp failed")
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "error",
+DownloadID: job.ID,
+Message:    fmt.Sprintf("Erreur yt-dlp: %v", err),
+})
+continue
+}
+
+// Find the downloaded file
+var newFileName string
+entries, err := os.ReadDir(videoDir)
+if err == nil {
+var newestTime time.Time
+for _, entry := range entries {
+if entry.IsDir() {
+continue
+}
+info, err := entry.Info()
+if err != nil {
+continue
+}
+if info.ModTime().After(newestTime) {
+newestTime = info.ModTime()
+newFileName = entry.Name()
+}
+}
+}
+
+if newFileName != "" {
+logrus.WithFields(logrus.Fields{
+"downloadId": job.ID,
+"file":       newFileName,
+}).Info("Download completed successfully")
+
+// Notify completion
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "done",
+DownloadID: job.ID,
+File:       newFileName,
+Message:    "Téléchargement terminé",
+})
+
+// Auto-play if requested
+if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
+go autoPlayVideo(newFileName, job.VLCUrl, job.BackendUrl)
+}
+
+// Prune old videos
+pruneVideos()
+} else {
+broadcastToSubscribers(job.ID, WSMessage{
+Type:       "error",
+DownloadID: job.ID,
+Message:    "Fichier téléchargé introuvable",
+})
+}
+}
+}
+
+// Stream output lines from yt-dlp to WebSocket subscribers
+func streamOutput(downloadId string, pipe io.ReadCloser, source string) {
+defer pipe.Close()
+scanner := bufio.NewScanner(pipe)
+for scanner.Scan() {
+line := strings.TrimSpace(scanner.Text())
+if line == "" {
+continue
+}
+
+logrus.WithFields(logrus.Fields{
+"downloadId": downloadId,
+"source":     source,
+"line":       line,
+}).Debug("yt-dlp output")
+
+// Try to extract percentage
+var percent float64 = 0
+if matches := percentRegex.FindStringSubmatch(line); len(matches) > 1 {
+if p, err := strconv.ParseFloat(matches[1], 64); err == nil {
+percent = p
+}
+}
+
+// Broadcast progress
+broadcastToSubscribers(downloadId, WSMessage{
+Type:       "progress",
+DownloadID: downloadId,
+Line:       line,
+Percent:    percent,
+})
+}
+
+if err := scanner.Err(); err != nil {
+logrus.WithError(err).WithField("downloadId", downloadId).Error("Error reading yt-dlp output")
+}
+}
+
+// Generate unique download ID
+func generateDownloadID() string {
+return fmt.Sprintf("dl_%d_%d", time.Now().Unix(), time.Now().Nanosecond())
 }
 
 // vlcStatusHandler retourne l'état d'authentification pour une URL VLC
@@ -808,12 +1172,15 @@ func vlcPlayHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"vlc_url":  vlcUrl,
-		"response": string(respBody),
-	}).Info("VLC PLAY - Réponse VLC")
+logrus.WithFields(logrus.Fields{
+"vlc_url":  vlcUrl,
+"response": string(respBody),
+}).Info("VLC PLAY - Réponse VLC")
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
+// Use sendSuccess/sendError instead of proxying raw response
+if resp.StatusCode == http.StatusOK {
+sendSuccess(w, "Commande VLC envoyée avec succès", "")
+} else {
+sendError(w, fmt.Sprintf("VLC response %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody))), http.StatusBadGateway)
+}
 }

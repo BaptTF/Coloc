@@ -7,7 +7,8 @@ const CONFIG = {
     vlcCode: '/vlc/code',
     vlcVerify: '/vlc/verify-code',
     vlcPlay: '/vlc/play',
-    vlcConfig: '/vlc/config'
+    vlcConfig: '/vlc/config',
+    websocket: '/ws'
   },
   selectors: {
     backendUrl: '#backendUrl',
@@ -15,10 +16,11 @@ const CONFIG = {
     videoUrl: '#videoUrl',
     autoPlay: '#autoPlay',
     vlcStatus: '#vlcStatus',
-    vlcAuthStatus: '#vlcAuthStatus',
     videosGrid: '#videosGrid',
     vlcModal: '#vlcModal',
-    vlcCode: '#vlcCode'
+    vlcCode: '#vlcCode',
+    downloadProgressSection: '#downloadProgressSection',
+    downloadsList: '#downloadsList'
   },
   classes: {
     loading: 'loading',
@@ -31,7 +33,12 @@ const CONFIG = {
 const state = {
   vlcChallenge: null,
   vlcAuthenticated: false,
-  isLoading: false
+  isLoading: false,
+  websocket: null,
+  wsConnected: false,
+  downloads: new Map(), // downloadId -> download info
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 5
 };
 
 // ===== DOM ELEMENTS =====
@@ -159,20 +166,11 @@ class ApiClient {
       }
 
       const contentType = response.headers.get('content-type');
-      const responseText = await response.text();
-      
-      // Only try to parse as JSON if it's actually JSON content type and valid JSON
       if (contentType && contentType.includes('application/json')) {
-        try {
-          return JSON.parse(responseText);
-        } catch (jsonError) {
-          console.warn('Response claimed to be JSON but failed to parse:', responseText);
-          return responseText;
-        }
+        return await response.json();
       }
       
-      // For non-JSON responses, return the text directly
-      return responseText;
+      return await response.text();
     } catch (error) {
       console.error('API Request failed:', error);
       throw error;
@@ -188,6 +186,248 @@ class ApiClient {
 
   static async get(url) {
     return this.request(url, { method: 'GET' });
+  }
+}
+
+// ===== WEBSOCKET MANAGEMENT =====
+class WebSocketManager {
+  static connect() {
+    if (state.websocket && state.websocket.readyState === WebSocket.OPEN) {
+      return; // Already connected
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}${CONFIG.endpoints.websocket}`;
+    
+    console.log('Connecting to WebSocket:', wsUrl);
+    
+    try {
+      state.websocket = new WebSocket(wsUrl);
+      
+      state.websocket.onopen = () => {
+        console.log('WebSocket connected');
+        state.wsConnected = true;
+        state.reconnectAttempts = 0;
+        WebSocketManager.updateStatus('connected');
+        
+        // Subscribe to all downloads
+        WebSocketManager.send({ action: 'subscribeAll' });
+      };
+      
+      state.websocket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          WebSocketManager.handleMessage(message);
+        } catch (error) {
+          console.error('Failed to parse WebSocket message:', error);
+        }
+      };
+      
+      state.websocket.onclose = () => {
+        console.log('WebSocket disconnected');
+        state.wsConnected = false;
+        WebSocketManager.updateStatus('disconnected');
+        
+        // Attempt to reconnect
+        if (state.reconnectAttempts < state.maxReconnectAttempts) {
+          state.reconnectAttempts++;
+          console.log(`Reconnecting... (${state.reconnectAttempts}/${state.maxReconnectAttempts})`);
+          setTimeout(() => WebSocketManager.connect(), 2000 * state.reconnectAttempts);
+        }
+      };
+      
+      state.websocket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        WebSocketManager.updateStatus('disconnected');
+      };
+      
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error);
+      WebSocketManager.updateStatus('disconnected');
+    }
+  }
+
+  static send(message) {
+    if (state.websocket && state.websocket.readyState === WebSocket.OPEN) {
+      state.websocket.send(JSON.stringify(message));
+    }
+  }
+
+  static handleMessage(message) {
+    console.log('WebSocket message:', message);
+    
+    switch (message.type) {
+      case 'queued':
+        DownloadManager.updateDownload(message.downloadId, {
+          status: 'queued',
+          message: message.message
+        });
+        break;
+      case 'progress':
+        DownloadManager.updateDownload(message.downloadId, {
+          status: 'downloading',
+          line: message.line,
+          percent: message.percent || 0
+        });
+        break;
+      case 'done':
+        DownloadManager.updateDownload(message.downloadId, {
+          status: 'completed',
+          message: message.message,
+          file: message.file,
+          percent: 100
+        });
+        // Refresh video list
+        VideoManager.listVideos();
+        break;
+      case 'error':
+        DownloadManager.updateDownload(message.downloadId, {
+          status: 'error',
+          message: message.message
+        });
+        break;
+      case 'list':
+        VideoManager.renderVideoGrid(message.videos);
+        break;
+    }
+  }
+
+  static updateStatus(status) {
+    // Update WebSocket status in header if we add it
+    const statusEl = document.querySelector('.ws-status');
+    if (statusEl) {
+      statusEl.className = `ws-status ${status}`;
+      statusEl.textContent = status === 'connected' ? 'WebSocket connecté' : 'WebSocket déconnecté';
+    }
+  }
+
+  static disconnect() {
+    if (state.websocket) {
+      state.websocket.close();
+      state.websocket = null;
+    }
+  }
+}
+
+// ===== DOWNLOAD MANAGEMENT =====
+class DownloadManager {
+  static createDownload(downloadId, url) {
+    const download = {
+      id: downloadId,
+      url: url,
+      status: 'queued',
+      percent: 0,
+      message: 'En file d\'attente...',
+      log: [],
+      createdAt: new Date()
+    };
+    
+    state.downloads.set(downloadId, download);
+    DownloadManager.renderDownload(download);
+    DownloadManager.showProgressSection();
+    
+    return download;
+  }
+
+  static updateDownload(downloadId, updates) {
+    const download = state.downloads.get(downloadId);
+    if (!download) return;
+    
+    // Update download object
+    Object.assign(download, updates);
+    
+    // Add line to log if provided
+    if (updates.line) {
+      download.log.push({
+        timestamp: new Date(),
+        line: updates.line
+      });
+    }
+    
+    // Re-render the download item
+    DownloadManager.renderDownload(download);
+  }
+
+  static renderDownload(download) {
+    let downloadEl = document.getElementById(`download-${download.id}`);
+    
+    if (!downloadEl) {
+      downloadEl = createElement('div', 'download-item');
+      downloadEl.id = `download-${download.id}`;
+      elements.downloadsList.appendChild(downloadEl);
+    }
+    
+    // Update classes based on status
+    downloadEl.className = `download-item ${download.status}`;
+    
+    downloadEl.innerHTML = `
+      <div class="download-header">
+        <div class="download-url" title="${download.url}">${download.url}</div>
+        <div class="download-status ${download.status}">
+          ${DownloadManager.getStatusText(download.status)}
+        </div>
+      </div>
+      
+      <div class="download-progress">
+        <div class="progress-bar">
+          <div class="progress-fill ${download.status === 'completed' ? 'completed' : ''}" 
+               style="width: ${download.percent}%"></div>
+        </div>
+        <div class="progress-text">
+          <span>${download.message}</span>
+          <span>${download.percent.toFixed(1)}%</span>
+        </div>
+      </div>
+      
+      ${download.log.length > 0 ? `
+        <div class="download-log">${download.log.map(entry => entry.line).join('\n')}</div>
+      ` : ''}
+      
+      ${download.status === 'completed' && download.file ? `
+        <div class="download-actions">
+          <button class="btn btn-accent btn-sm" onclick="VlcManager.playVideo('${download.file}')">
+            ▶ Lancer sur VLC
+          </button>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  static getStatusText(status) {
+    const statusTexts = {
+      queued: 'En file',
+      downloading: 'Téléchargement',
+      completed: 'Terminé',
+      error: 'Erreur'
+    };
+    return statusTexts[status] || status;
+  }
+
+  static showProgressSection() {
+    if (elements.downloadProgressSection) {
+      elements.downloadProgressSection.style.display = 'block';
+    }
+  }
+
+  static hideProgressSection() {
+    if (elements.downloadProgressSection && state.downloads.size === 0) {
+      elements.downloadProgressSection.style.display = 'none';
+    }
+  }
+
+  static clearCompleted() {
+    const completed = Array.from(state.downloads.entries())
+      .filter(([_, download]) => download.status === 'completed' || download.status === 'error');
+    
+    completed.forEach(([id, _]) => {
+      const downloadEl = document.getElementById(`download-${id}`);
+      if (downloadEl) downloadEl.remove();
+      state.downloads.delete(id);
+    });
+    
+    if (state.downloads.size === 0) {
+      DownloadManager.hideProgressSection();
+    }
   }
 }
 
@@ -230,15 +470,6 @@ class StatusManager {
       loginBtn.textContent = state.vlcAuthenticated ? 'Reconnexion' : 'Se connecter';
     }
   }
-
-  // Legacy methods for compatibility
-  static updateVlcConnection(isConnected) {
-    this.updateVlcStatus(isConnected ? 'connectable' : 'disconnected');
-  }
-
-  static updateVlcAuth(isAuthenticated, message = '') {
-    this.updateVlcStatus(isAuthenticated ? 'authenticated' : 'connectable');
-  }
 }
 
 // ===== VLC FUNCTIONALITY =====
@@ -257,7 +488,7 @@ class VlcManager {
       });
 
       const isConnected = response.ok || response.status === 401;
-      StatusManager.updateVlcConnection(isConnected);
+      StatusManager.updateVlcStatus(isConnected ? 'connectable' : 'disconnected');
       
       if (isConnected) {
         toast.show('VLC accessible', 'success');
@@ -265,7 +496,7 @@ class VlcManager {
         toast.show(`VLC inaccessible: Status ${response.status}`, 'error');
       }
     } catch (error) {
-      StatusManager.updateVlcConnection(false);
+      StatusManager.updateVlcStatus('disconnected');
       toast.show(`VLC inaccessible: ${error.message}`, 'error');
     }
   }
@@ -279,10 +510,15 @@ class VlcManager {
 
     try {
       await VlcManager.saveConfig();
-      const challenge = await ApiClient.get(`${CONFIG.endpoints.vlcCode}?vlc=${encodeURIComponent(vlcUrl)}`);
-      state.vlcChallenge = challenge;
-      ModalManager.show('vlcModal');
-      elements.vlcCode?.focus();
+      const response = await ApiClient.get(`${CONFIG.endpoints.vlcCode}?vlc=${encodeURIComponent(vlcUrl)}`);
+      
+      if (response.success) {
+        state.vlcChallenge = response.file; // The challenge is in the 'file' field
+        ModalManager.show('vlcModal');
+        elements.vlcCode?.focus();
+      } else {
+        toast.show(`Erreur VLC: ${response.message}`, 'error');
+      }
     } catch (error) {
       toast.show(`Impossible de contacter VLC: ${error.message}`, 'error');
     }
@@ -302,13 +538,17 @@ class VlcManager {
     }
 
     try {
-      await ApiClient.post(`${CONFIG.endpoints.vlcVerify}?vlc=${encodeURIComponent(vlcUrl)}`, {
+      const response = await ApiClient.post(`${CONFIG.endpoints.vlcVerify}?vlc=${encodeURIComponent(vlcUrl)}`, {
         code: code
       });
 
-      StatusManager.updateVlcAuth(true);
-      toast.show('Authentification VLC réussie', 'success');
-      ModalManager.hide('vlcModal');
+      if (response.success) {
+        StatusManager.updateVlcStatus('authenticated');
+        toast.show('Authentification VLC réussie', 'success');
+        ModalManager.hide('vlcModal');
+      } else {
+        toast.show(`Erreur authentification: ${response.message}`, 'error');
+      }
     } catch (error) {
       toast.show('Code incorrect', 'error');
     }
@@ -332,11 +572,16 @@ class VlcManager {
       const videoPath = `${backendUrl}/videos/${encodeURIComponent(filename)}`;
       const url = `${CONFIG.endpoints.vlcPlay}?vlc=${encodeURIComponent(vlcUrl)}&id=-1&path=${encodeURIComponent(videoPath)}&type=stream`;
       
-      await ApiClient.get(url);
-      toast.show(`Lecture lancée: ${filename}`, 'success');
+      const response = await ApiClient.get(url);
+      
+      if (response.success) {
+        toast.show(`Lecture lancée: ${filename}`, 'success');
+      } else {
+        toast.show(`Erreur VLC: ${response.message}`, 'error');
+      }
     } catch (error) {
       if (error.message.includes('401') || error.message.includes('403')) {
-        StatusManager.updateVlcAuth(false, 'Session expirée');
+        StatusManager.updateVlcStatus('connectable');
         toast.show('Session VLC expirée, reconnectez-vous', 'error');
       } else {
         toast.show(`Erreur lecture VLC: ${error.message}`, 'error');
@@ -354,7 +599,7 @@ class VlcManager {
         }
 
         if (lastConfig.authenticated) {
-          StatusManager.updateVlcAuth(true, 'Authentifié (persistant)');
+          StatusManager.updateVlcStatus('authenticated');
           toast.show('Configuration VLC restaurée', 'success');
         }
       }
@@ -437,8 +682,6 @@ class VideoManager {
     setLoadingState(true);
     toast.clear();
 
-    const loadingToast = toast.show('Téléchargement en cours...', 'info', 0);
-
     try {
       const requestData = {
         url: url,
@@ -447,27 +690,31 @@ class VideoManager {
         backendUrl: elements.backendUrl?.value?.trim() || ''
       };
 
-      const data = await ApiClient.post(endpoint, requestData);
+      const response = await ApiClient.post(endpoint, requestData);
       
-      if (data.success) {
-        let message = `✓ ${data.message}`;
-        if (data.file) {
-          message += ` - ${data.file}`;
-        }
-        if (requestData.autoPlay && data.file) {
-          message += ' 🎬 Auto-play en cours...';
-        }
-        
-        toast.show(message, 'success');
+      if (response.success) {
+        toast.show(`${response.message}`, 'success');
         elements.videoUrl.value = '';
-        VideoManager.listVideos();
+        
+        // For YouTube downloads, create download tracking
+        if (endpoint === CONFIG.endpoints.youtube && response.file) {
+          DownloadManager.createDownload(response.file, url);
+          
+          // Subscribe to this specific download
+          WebSocketManager.send({
+            action: 'subscribe',
+            downloadId: response.file
+          });
+        } else {
+          // For direct downloads, refresh video list immediately
+          VideoManager.listVideos();
+        }
       } else {
-        toast.show(`✗ ${data.message}`, 'error');
+        toast.show(`Erreur: ${response.message}`, 'error');
       }
     } catch (error) {
-      toast.show(`✗ Erreur: ${error.message}`, 'error');
+      toast.show(`Erreur: ${error.message}`, 'error');
     } finally {
-      toast.remove(loadingToast);
       setLoadingState(false);
     }
   }
@@ -585,6 +832,22 @@ function setupEventListeners() {
 
   // Setup modal event listeners
   ModalManager.setupEventListeners();
+  
+  // Add clear completed downloads button to header if section exists
+  const progressSection = elements.downloadProgressSection;
+  if (progressSection) {
+    const header = progressSection.querySelector('.card-header');
+    if (header) {
+      const clearBtn = createElement('button', 'btn btn-ghost btn-sm');
+      clearBtn.textContent = 'Effacer terminés';
+      clearBtn.onclick = DownloadManager.clearCompleted;
+      
+      const description = header.querySelector('.card-description');
+      if (description) {
+        description.appendChild(clearBtn);
+      }
+    }
+  }
 }
 
 // ===== INITIALIZATION =====
@@ -604,6 +867,9 @@ async function initializeApp() {
   
   // Setup event listeners
   setupEventListeners();
+  
+  // Connect WebSocket
+  WebSocketManager.connect();
   
   // Load initial data
   await Promise.all([
@@ -638,7 +904,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// ===== CLEANUP ON PAGE UNLOAD =====
+window.addEventListener('beforeunload', () => {
+  WebSocketManager.disconnect();
+});
+
 // ===== GLOBAL EXPORTS FOR COMPATIBILITY =====
 window.VlcManager = VlcManager;
 window.VideoManager = VideoManager;
 window.ModalManager = ModalManager;
+window.DownloadManager = DownloadManager;
+window.WebSocketManager = WebSocketManager;

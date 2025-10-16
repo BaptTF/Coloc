@@ -28,6 +28,10 @@
             <div class="status-dot"></div>
             Déconnecté
           </div>
+          <div class="ws-status connecting">
+            <div class="status-dot"></div>
+            WebSocket...
+          </div>
         </div>
       </div>
     </div>
@@ -109,6 +113,24 @@
           <button type="button" id="downloadYoutube" class="btn btn-danger">
             📺 Télécharger (YouTube/yt-dlp)
           </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download Progress Section -->
+    <section class="section" id="downloadProgressSection" style="display: none;">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">
+            ⏳ Téléchargements en cours
+          </h2>
+          <p class="card-description">
+            Suivez l'avancement de vos téléchargements en temps réel
+          </p>
+        </div>
+        
+        <div id="downloadsList" class="downloads-list">
+          <!-- Downloads will be added here dynamically -->
         </div>
       </div>
     </section>
