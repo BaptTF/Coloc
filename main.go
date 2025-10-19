@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lrstanley/go-ytdlp"
 	"github.com/sirupsen/logrus"
+	"github.com/u2takey/ffmpeg-go"
 )
 
 //go:embed index.html
@@ -114,9 +115,27 @@ var (
 )
 
 func main() {
+	// Check for install-only mode
+	if len(os.Args) > 1 && os.Args[1] == "install-tools" {
+		logrus.Info("Installing yt-dlp and ffmpeg...")
+		ytdlp.MustInstall(context.TODO(), nil)
+		ytdlp.MustInstallFFmpeg(context.TODO(), nil)
+		ytdlp.MustInstallFFprobe(context.TODO(), nil)
+		logrus.Info("Tools installed successfully")
+		return
+	}
+
 	// Configure logrus
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 	logrus.SetLevel(logrus.InfoLevel)
+
+	// Add ffmpeg to PATH before installation
+	ffmpegPath := "/root/.cache/go-ytdlp"
+	if currentPath := os.Getenv("PATH"); currentPath != "" {
+		os.Setenv("PATH", ffmpegPath+":"+currentPath)
+	} else {
+		os.Setenv("PATH", ffmpegPath)
+	}
 
 	// Install yt-dlp and ffmpeg if needed
 	logrus.Info("Installing yt-dlp and ffmpeg if needed...")
@@ -125,6 +144,12 @@ func main() {
 
 	// Crée le dossier videos s'il n'existe pas
 	if err := os.MkdirAll(videoDir, 0755); err != nil {
+		logrus.Fatal(err)
+	}
+
+	// Create segments directory
+	segmentsDir := filepath.Join(videoDir, "segments")
+	if err := os.MkdirAll(segmentsDir, 0755); err != nil {
 		logrus.Fatal(err)
 	}
 
@@ -850,101 +875,219 @@ func getVideoList() []string {
 	return files
 }
 
-// Download worker that processes the download queue
+// Download worker that processes the stream queue
 func downloadWorker() {
-	logrus.Info("Download worker started")
+	logrus.Info("Stream worker started")
 	for job := range downloadJobs {
 		logrus.WithFields(logrus.Fields{
 			"downloadId": job.ID,
 			"url":        job.URL,
-		}).Info("Processing download job")
+		}).Info("Processing stream job")
 
-		// Notify subscribers that download is starting
+		// Notify subscribers that streaming is starting
 		broadcastToSubscribers(job.ID, WSMessage{
 			Type:       "queued",
 			DownloadID: job.ID,
-			Message:    "Téléchargement en file d'attente",
+			Message:    "Streaming en file d'attente",
 		})
 
-		// Create yt-dlp command with progress callback
+		// Get video and audio URLs using yt-dlp
 		dl := ytdlp.New().
-			FormatSort("res,ext:mp4:m4a").
-			RecodeVideo("mp4").
-			NoPlaylist().
-			Output(job.OutputTemplate).
-			ProgressFunc(100*time.Millisecond, func(update ytdlp.ProgressUpdate) {
-				// Broadcast progress update
-				broadcastToSubscribers(job.ID, WSMessage{
-					Type:       "progress",
-					DownloadID: job.ID,
-					Line:       fmt.Sprintf("%s @ %s", update.Status, update.PercentString()),
-					Percent:    update.Percent(),
-				})
-			})
+			GetTitle().
+			GetURL().
+			Format("bestaudio[ext=m4a]+bestvideo[ext=mp4]").
+			NoPlaylist()
 
-		// Execute download
-		_, err := dl.Run(context.TODO(), job.URL)
+		output, err := dl.Run(context.TODO(), job.URL)
 		if err != nil {
-			logrus.WithError(err).Error("yt-dlp failed")
+			logrus.WithError(err).Error("yt-dlp URL extraction failed")
 			broadcastToSubscribers(job.ID, WSMessage{
 				Type:       "error",
 				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur yt-dlp: %v", err),
+				Message:    fmt.Sprintf("Erreur extraction URL: %v", err),
 			})
 			continue
 		}
 
-		// Find the downloaded file
-		var newFileName string
-		entries, err := os.ReadDir(videoDir)
-		if err == nil {
-			var newestTime time.Time
-			for _, entry := range entries {
-				if entry.IsDir() {
-					continue
-				}
-				info, err := entry.Info()
-				if err != nil {
-					continue
-				}
-				if info.ModTime().After(newestTime) {
-					newestTime = info.ModTime()
-					newFileName = entry.Name()
-				}
-			}
-		}
+		// Parse the output: title (optional), then URLs
+		lines := strings.Split(strings.TrimSpace(output.Stdout), "\n")
+		logrus.WithFields(logrus.Fields{
+			"urlCount": len(lines),
+			"stdout":   output.Stdout[:200] + "...", // Truncate for logging
+		}).Info("yt-dlp output received")
 
-		if newFileName != "" {
-			logrus.WithFields(logrus.Fields{
-				"downloadId": job.ID,
-				"file":       newFileName,
-			}).Info("Download completed successfully")
+		var title string
+		var videoURL, audioURL string
 
-			// Notify completion
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "done",
-				DownloadID: job.ID,
-				File:       newFileName,
-				Message:    "Téléchargement terminé",
-			})
-
-			// Auto-play if requested
-			if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
-				go autoPlayVideo(newFileName, job.VLCUrl, job.BackendUrl)
-			}
-
-			// Prune old videos
-			pruneVideos()
+		if len(lines) == 3 {
+			// Title + 2 URLs
+			title = strings.TrimSpace(lines[0])
+			videoURL = strings.TrimSpace(lines[1])
+			audioURL = strings.TrimSpace(lines[2])
+		} else if len(lines) == 2 {
+			// No title, just 2 URLs
+			videoURL = strings.TrimSpace(lines[0])
+			audioURL = strings.TrimSpace(lines[1])
+			title = "" // Will fallback to job ID
 		} else {
+			logrus.Error("Unexpected number of output lines from yt-dlp")
 			broadcastToSubscribers(job.ID, WSMessage{
 				Type:       "error",
 				DownloadID: job.ID,
-				Message:    "Fichier téléchargé introuvable",
+				Message:    "Nombre inattendu de lignes de yt-dlp",
 			})
+			continue
+		}
+
+		// Sanitize title for filename
+		sanitizedTitle := sanitizeFilename(title)
+		if sanitizedTitle == "" {
+			sanitizedTitle = job.ID // fallback to ID if title is empty
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"title":    title,
+			"sanitizedTitle": sanitizedTitle,
+			"videoURL": videoURL[:50] + "...",
+			"audioURL": audioURL[:50] + "...",
+		}).Info("Title and URLs extracted successfully")
+
+		// Create segments directory for this video
+		segmentsDir := filepath.Join(videoDir, "segments", job.ID)
+		if err := os.MkdirAll(segmentsDir, 0755); err != nil {
+			logrus.WithError(err).Error("Failed to create segments directory")
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "error",
+				DownloadID: job.ID,
+				Message:    fmt.Sprintf("Erreur création dossier segments: %v", err),
+			})
+			continue
+		}
+
+		// Generate HLS stream name
+		streamName := fmt.Sprintf("%s.m3u8", sanitizedTitle)
+		segmentPattern := filepath.Join("/videos", "segments", job.ID, job.ID, "segment_%03d.ts")
+
+		// Ensure the segment subfolder exists
+		segmentSubDir := filepath.Join(segmentsDir, job.ID, job.ID)
+		if err := os.MkdirAll(segmentSubDir, 0755); err != nil {
+			logrus.WithError(err).Error("Failed to create segment subfolder")
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "error",
+				DownloadID: job.ID,
+				Message:    fmt.Sprintf("Erreur création dossier segments: %v", err),
+			})
+			continue
+		}
+
+		// Start HLS conversion with ffmpeg
+		videoInput := ffmpeg_go.Input(videoURL)
+		audioInput := ffmpeg_go.Input(audioURL)
+
+		// Change to videos directory for ffmpeg execution
+		oldDir, err := os.Getwd()
+		if err != nil {
+			logrus.WithError(err).Error("Failed to get current directory")
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "error",
+				DownloadID: job.ID,
+				Message:    fmt.Sprintf("Erreur répertoire: %v", err),
+			})
+			continue
+		}
+
+		if err := os.Chdir(videoDir); err != nil {
+			logrus.WithError(err).Error("Failed to change to videos directory")
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "error",
+				DownloadID: job.ID,
+				Message:    fmt.Sprintf("Erreur changement répertoire: %v", err),
+			})
+			continue
+		}
+
+		err = ffmpeg_go.Output([]*ffmpeg_go.Stream{videoInput, audioInput}, streamName,
+			ffmpeg_go.KwArgs{
+				"c:v":                   "copy",
+				"c:a":                   "copy",
+				"f":                     "hls",
+				"hls_time":              "6",
+				"hls_list_size":         "0",
+				"hls_segment_filename":  segmentPattern,
+				"hls_base_url":          fmt.Sprintf("segments/%s/%s/", job.ID, job.ID),
+				"start_number":          "0",
+			}).Run()
+
+		// Change back to original directory
+		os.Chdir(oldDir)
+
+		if err != nil {
+			logrus.WithError(err).Error("ffmpeg HLS conversion failed")
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "error",
+				DownloadID: job.ID,
+				Message:    fmt.Sprintf("Erreur conversion HLS: %v", err),
+			})
+			continue
+		}
+
+		// Streaming URL
+		streamURL := fmt.Sprintf("/videos/%s", streamName)
+
+		logrus.WithFields(logrus.Fields{
+			"downloadId": job.ID,
+			"streamURL":  streamURL,
+		}).Info("HLS stream created successfully")
+
+		// Notify completion with stream URL
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "done",
+			DownloadID: job.ID,
+			File:       streamURL,
+			Message:    "Streaming prêt",
+		})
+
+		// Auto-play if requested
+		if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
+			go autoPlayVideo(streamURL, job.VLCUrl, job.BackendUrl)
 		}
 	}
 }
 
+
+// sanitizeFilename cleans a string to make it safe for use as a filename
+func sanitizeFilename(filename string) string {
+	// Replace characters that are problematic in filenames
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+		"\n", "_",
+		"\r", "_",
+		"\t", "_",
+	)
+
+	sanitized := replacer.Replace(filename)
+
+	// Trim spaces and limit length
+	sanitized = strings.TrimSpace(sanitized)
+	if len(sanitized) > 200 {
+		sanitized = sanitized[:200]
+	}
+
+	// Ensure it's not empty
+	if sanitized == "" {
+		return ""
+	}
+
+	return sanitized
+}
 
 // Generate unique download ID
 func generateDownloadID() string {
