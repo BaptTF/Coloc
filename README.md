@@ -115,13 +115,12 @@ deploy:
 ### Sans Docker
 
 ```bash
-# Installer yt-dlp
-python3 -m pip install -U --pre "yt-dlp[default]"
-
 # Compiler et lancer
 go build -o video-server main.go
 ./video-server
 ```
+
+Note: yt-dlp est automatiquement installé et géré par la bibliothèque Go.
 
 ### Avec Docker (dev)
 
@@ -160,7 +159,7 @@ docker-compose logs video-server | jq '.'
 
 - ✅ Image FROM scratch ultra-minimale (~15MB)
 - ✅ Binaire Go statique sans dépendances
-- ✅ yt-dlp binaire statique (pas d'interpréteur Python)
+- ✅ yt-dlp géré automatiquement par la bibliothèque Go
 - ✅ Multi-stage build pour image optimale
 - ✅ Authentification VLC sécurisée côté serveur
 - ✅ Pas d'exposition des cookies VLC au client
@@ -188,11 +187,11 @@ docker-compose logs video-server | grep VLC
 
 **Téléchargement échoue** :
 ```bash
-# Tester yt-dlp manuellement
-docker-compose exec video-server yt-dlp --version
-
 # Vérifier les permissions
 docker-compose exec video-server ls -la /app/videos/
+
+# Vérifier les logs pour les erreurs yt-dlp
+docker-compose logs video-server | grep -i error
 ```
 
 **Problème de mémoire** :

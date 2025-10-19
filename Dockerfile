@@ -8,24 +8,14 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o video-server main.go
 
-# Stage 2: Download yt-dlp static binary
-FROM alpine:latest AS downloader
+# Stage 2: Final minimal image
+FROM debian:bookworm-slim
 
-RUN apk add --no-cache curl ca-certificates \
-    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /yt-dlp \
-    && chmod +x /yt-dlp
-
-# Stage 3: Final minimal image with ffmpeg
-FROM python:3.12-alpine
-
-# Install ffmpeg and clean up in single layer to minimize image size
-RUN apk add --no-cache ffmpeg
+# Install ca-certificates for HTTPS downloads
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy the Go binary
 COPY --from=builder /app/video-server /video-server
-
-# Copy yt-dlp static binary
-COPY --from=downloader /yt-dlp /yt-dlp
 
 # Expose port
 EXPOSE 8080

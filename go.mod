@@ -4,7 +4,14 @@ go 1.24.6
 
 require (
 	github.com/gorilla/websocket v1.5.3
+	github.com/lrstanley/go-ytdlp v1.2.6
 	github.com/sirupsen/logrus v1.9.3
 )
 
-require golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+require (
+	github.com/ProtonMail/go-crypto v1.3.0 // indirect
+	github.com/cloudflare/circl v1.6.1 // indirect
+	github.com/ulikunitz/xz v0.5.15 // indirect
+	golang.org/x/crypto v0.43.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
+)

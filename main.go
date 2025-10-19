@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -12,16 +12,14 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/lrstanley/go-ytdlp"
 	"github.com/sirupsen/logrus"
 )
 
@@ -34,7 +32,7 @@ var stylesCSS []byte
 //go:embed app.js
 var appJS []byte
 
-const videoDir = "./videos"
+const videoDir = "/videos"
 
 // Structure pour maintenir les sessions VLC
 type VLCSession struct {
@@ -113,13 +111,17 @@ var (
 			return true // Allow all origins for development
 		},
 	}
-	percentRegex = regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
 )
 
 func main() {
 	// Configure logrus
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 	logrus.SetLevel(logrus.InfoLevel)
+
+	// Install yt-dlp and ffmpeg if needed
+	logrus.Info("Installing yt-dlp and ffmpeg if needed...")
+	ytdlp.MustInstallAll(context.TODO())
+	logrus.Info("yt-dlp and ffmpeg ready")
 
 	// Crée le dossier videos s'il n'existe pas
 	if err := os.MkdirAll(videoDir, 0755); err != nil {
@@ -864,69 +866,24 @@ func downloadWorker() {
 			Message:    "Téléchargement en file d'attente",
 		})
 
-		// Check if yt-dlp is updated
-		cmd := exec.Command("./yt-dlp", "-U")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			logrus.WithError(err).Error("yt-dlp update failed")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur yt-dlp -U: %v\n%s", err, output),
+		// Create yt-dlp command with progress callback
+		dl := ytdlp.New().
+			FormatSort("res,ext:mp4:m4a").
+			RecodeVideo("mp4").
+			NoPlaylist().
+			Output(job.OutputTemplate).
+			ProgressFunc(100*time.Millisecond, func(update ytdlp.ProgressUpdate) {
+				// Broadcast progress update
+				broadcastToSubscribers(job.ID, WSMessage{
+					Type:       "progress",
+					DownloadID: job.ID,
+					Line:       fmt.Sprintf("%s @ %s", update.Status, update.PercentString()),
+					Percent:    update.Percent(),
+				})
 			})
-			continue
-		}
 
-		// Execute yt-dlp with progress streaming
-		cmd = exec.Command("./yt-dlp",
-			"-f", "best[ext=mp4]",
-			"-o", job.OutputTemplate,
-			"--no-playlist",
-			"--newline", // Force newline after each progress line
-			job.URL,
-		)
-
-		// Get stdout and stderr pipes
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			logrus.WithError(err).Error("Failed to get stdout pipe")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur création pipe: %v", err),
-			})
-			continue
-		}
-
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			logrus.WithError(err).Error("Failed to get stderr pipe")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur création pipe stderr: %v", err),
-			})
-			continue
-		}
-
-		// Start the command
-		err = cmd.Start()
-		if err != nil {
-			logrus.WithError(err).Error("Failed to start yt-dlp")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur démarrage yt-dlp: %v", err),
-			})
-			continue
-		}
-
-		// Stream stdout and stderr
-		go streamOutput(job.ID, stdout, "stdout")
-		go streamOutput(job.ID, stderr, "stderr")
-
-		// Wait for command to complete
-		err = cmd.Wait()
+		// Execute download
+		_, err := dl.Run(context.TODO(), job.URL)
 		if err != nil {
 			logrus.WithError(err).Error("yt-dlp failed")
 			broadcastToSubscribers(job.ID, WSMessage{
@@ -988,43 +945,6 @@ func downloadWorker() {
 	}
 }
 
-// Stream output lines from yt-dlp to WebSocket subscribers
-func streamOutput(downloadId string, pipe io.ReadCloser, source string) {
-	defer pipe.Close()
-	scanner := bufio.NewScanner(pipe)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"downloadId": downloadId,
-			"source":     source,
-			"line":       line,
-		}).Debug("yt-dlp output")
-
-		// Try to extract percentage
-		var percent float64 = 0
-		if matches := percentRegex.FindStringSubmatch(line); len(matches) > 1 {
-			if p, err := strconv.ParseFloat(matches[1], 64); err == nil {
-				percent = p
-			}
-		}
-
-		// Broadcast progress
-		broadcastToSubscribers(downloadId, WSMessage{
-			Type:       "progress",
-			DownloadID: downloadId,
-			Line:       line,
-			Percent:    percent,
-		})
-	}
-
-	if err := scanner.Err(); err != nil {
-		logrus.WithError(err).WithField("downloadId", downloadId).Error("Error reading yt-dlp output")
-	}
-}
 
 // Generate unique download ID
 func generateDownloadID() string {
