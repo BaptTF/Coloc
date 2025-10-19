@@ -895,49 +895,69 @@ func downloadWorker() {
 		dl := ytdlp.New().
 			GetTitle().
 			GetURL().
-			Format("bestaudio[ext=m4a]+bestvideo[ext=mp4]").
+			Format("bestvideo[ext=mp4]").
 			NoPlaylist()
 
 		output, err := dl.Run(context.TODO(), job.URL)
 		if err != nil {
-			logrus.WithError(err).Error("yt-dlp URL extraction failed")
+			logrus.WithError(err).Error("yt-dlp video URL extraction failed")
 			broadcastToSubscribers(job.ID, WSMessage{
 				Type:       "error",
 				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur extraction URL: %v", err),
+				Message:    fmt.Sprintf("Erreur extraction URL vidéo: %v", err),
 			})
 			continue
 		}
 
-		// Parse the output: title (optional), then URLs
+		// Parse the video output: title, then video URL
 		lines := strings.Split(strings.TrimSpace(output.Stdout), "\n")
 		logrus.WithFields(logrus.Fields{
 			"urlCount": len(lines),
 			"stdout":   output.Stdout[:200] + "...", // Truncate for logging
-		}).Info("yt-dlp output received")
+		}).Info("yt-dlp video output received")
 
 		var title string
-		var videoURL, audioURL string
+		var videoURL string
 
-		if len(lines) == 3 {
-			// Title + 2 URLs
+		if len(lines) == 2 {
+			// Title + video URL
 			title = strings.TrimSpace(lines[0])
 			videoURL = strings.TrimSpace(lines[1])
-			audioURL = strings.TrimSpace(lines[2])
-		} else if len(lines) == 2 {
-			// No title, just 2 URLs
+		} else if len(lines) == 1 {
+			// No title, just video URL
 			videoURL = strings.TrimSpace(lines[0])
-			audioURL = strings.TrimSpace(lines[1])
 			title = "" // Will fallback to job ID
 		} else {
-			logrus.Error("Unexpected number of output lines from yt-dlp")
+			logrus.Error("Unexpected number of video output lines from yt-dlp")
 			broadcastToSubscribers(job.ID, WSMessage{
 				Type:       "error",
 				DownloadID: job.ID,
-				Message:    "Nombre inattendu de lignes de yt-dlp",
+				Message:    "Nombre inattendu de lignes vidéo de yt-dlp",
 			})
 			continue
 		}
+
+		// Get audio URL
+		dlAudio := ytdlp.New().
+			GetURL().
+			Format("bestaudio[ext=m4a]").
+			NoPlaylist()
+
+		outputAudio, err := dlAudio.Run(context.TODO(), job.URL)
+		if err != nil {
+			logrus.WithError(err).Error("yt-dlp audio URL extraction failed")
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "error",
+				DownloadID: job.ID,
+				Message:    fmt.Sprintf("Erreur extraction URL audio: %v", err),
+			})
+			continue
+		}
+
+		audioURL := strings.TrimSpace(outputAudio.Stdout)
+		logrus.WithFields(logrus.Fields{
+			"audioURL": audioURL[:50] + "...",
+		}).Info("yt-dlp audio URL extracted successfully")
 
 		// Sanitize title for filename
 		sanitizedTitle := sanitizeFilename(title)
@@ -984,6 +1004,10 @@ func downloadWorker() {
 		videoInput := ffmpeg_go.Input(videoURL)
 		audioInput := ffmpeg_go.Input(audioURL)
 
+		// Explicitly map video from first input and audio from second input
+		videoStream := videoInput.Video()
+		audioStream := audioInput.Audio()
+
 		// Change to videos directory for ffmpeg execution
 		oldDir, err := os.Getwd()
 		if err != nil {
@@ -1006,7 +1030,7 @@ func downloadWorker() {
 			continue
 		}
 
-		err = ffmpeg_go.Output([]*ffmpeg_go.Stream{videoInput, audioInput}, streamName,
+		err = ffmpeg_go.Output([]*ffmpeg_go.Stream{videoStream, audioStream}, streamName,
 			ffmpeg_go.KwArgs{
 				"c:v":                   "copy",
 				"c:a":                   "copy",
