@@ -10,7 +10,8 @@ const CONFIG = {
     vlcVerify: '/vlc/verify-code',
     vlcPlay: '/vlc/play',
     vlcConfig: '/vlc/config',
-    websocket: '/ws'
+    websocket: '/ws',
+    queueClear: '/queue/clear'
   },
   selectors: {
     backendUrl: '#backendUrl',
@@ -422,12 +423,11 @@ class DownloadManager {
         DownloadManager.renderDownload(download);
       });
       
-      // Show progress section if there are active downloads
-      const hasActiveDownloads = Array.from(state.downloads.values())
-        .some(d => d.status === 'queued' || d.status === 'processing');
-      
-      if (hasActiveDownloads) {
+      // Show progress section if there are any downloads (active or completed/error)
+      if (state.downloads.size > 0) {
         DownloadManager.showProgressSection();
+      } else {
+        DownloadManager.hideProgressSection();
       }
     } catch (error) {
       console.error('Error in updateQueueStatus:', error);
@@ -514,18 +514,20 @@ class DownloadManager {
     }
   }
 
-  static clearCompleted() {
-    const completed = Array.from(state.downloads.entries())
-      .filter(([_, download]) => download.status === 'completed' || download.status === 'error');
-    
-    completed.forEach(([id, _]) => {
-      const downloadEl = document.getElementById(`download-${id}`);
-      if (downloadEl) downloadEl.remove();
-      state.downloads.delete(id);
-    });
-    
-    if (state.downloads.size === 0) {
-      DownloadManager.hideProgressSection();
+  static async clearCompleted() {
+    try {
+      // Call backend to clear the queue for everyone
+      const response = await ApiClient.post(CONFIG.endpoints.queueClear, {});
+      
+      if (response.success) {
+        toast.show('File d\'attente nettoyée', 'success');
+        // The backend will broadcast the updated queue status to all clients
+      } else {
+        toast.show(`Erreur: ${response.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('Error clearing queue:', error);
+      toast.show(`Erreur lors du nettoyage: ${error.message}`, 'error');
     }
   }
 }

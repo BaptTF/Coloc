@@ -349,6 +349,7 @@ func main() {
 
 	// API endpoints (must be before the catch-all "/" handler)
 	http.HandleFunc("/queue", queueStatusHandler)
+	http.HandleFunc("/queue/clear", clearQueueHandler)
 	http.HandleFunc("/url", downloadURLHandler)
 	http.HandleFunc("/urlyt", downloadYouTubeHandler)
 	http.HandleFunc("/twitch", downloadTwitchHandler)
@@ -1209,6 +1210,29 @@ func queueStatusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"queue": statuses,
 	})
+}
+
+// API endpoint to clear the queue (completed and error jobs)
+func clearQueueHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	jobStatusesMutex.Lock()
+	// Remove completed and error jobs from the queue
+	for id, status := range jobStatuses {
+		if status.Status == "completed" || status.Status == "error" {
+			delete(jobStatuses, id)
+		}
+	}
+	jobStatusesMutex.Unlock()
+
+	// Broadcast updated queue status to all clients
+	broadcastQueueStatus()
+
+	logrus.Info("Queue cleared of completed and error jobs")
+	sendSuccess(w, "File d'attente nettoyée", "")
 }
 
 // Get current video list (helper function)
