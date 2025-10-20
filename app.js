@@ -16,7 +16,6 @@ const CONFIG = {
     backendUrl: '#backendUrl',
     vlcUrl: '#vlcUrl',
     videoUrl: '#videoUrl',
-    directUrl: '#directUrl',
     autoPlay: '#autoPlay',
     vlcStatus: '#vlcStatus',
     videosGrid: '#videosGrid',
@@ -854,7 +853,7 @@ class VideoManager {
   }
 
   static async playDirectUrl() {
-    const url = elements.directUrl?.value?.trim();
+    const url = elements.videoUrl?.value?.trim();
     if (!url) {
       toast.show('Veuillez entrer une URL', 'error');
       return;
@@ -879,7 +878,7 @@ class VideoManager {
       
       if (response.success) {
         toast.show(`${response.message}`, 'success');
-        elements.directUrl.value = '';
+        elements.videoUrl.value = '';
       } else {
         toast.show(`Erreur: ${response.message}`, 'error');
       }
@@ -962,7 +961,6 @@ function setupEventListeners() {
   const youtubeDownloadBtn = document.getElementById('downloadYoutubeDownload');
   const twitchBtn = document.getElementById('downloadTwitch');
   const playDirectBtn = document.getElementById('playDirect');
-  const playDirectUrlBtn = document.getElementById('playDirectUrl');
   
   if (directBtn) {
     directBtn.onclick = () => VideoManager.download(CONFIG.endpoints.direct, 'direct');
@@ -981,11 +979,7 @@ function setupEventListeners() {
   }
   
   if (playDirectBtn) {
-    playDirectBtn.onclick = () => VideoManager.download(CONFIG.endpoints.direct, 'direct');
-  }
-  
-  if (playDirectUrlBtn) {
-    playDirectUrlBtn.onclick = VideoManager.playDirectUrl;
+    playDirectBtn.onclick = VideoManager.playDirectUrl;
   }
 
   // VLC buttons
@@ -1017,15 +1011,6 @@ function setupEventListeners() {
     elements.videoUrl.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
-      }
-    });
-  }
-
-  // Enter key for direct URL
-  if (elements.directUrl) {
-    elements.directUrl.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        VideoManager.playDirectUrl();
       }
     });
   }

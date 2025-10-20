@@ -1289,11 +1289,14 @@ func processDownloadJob(job *DownloadJob) {
 	})
 
 	// Create yt-dlp command with progress callback using go-ytdlp library
+	// Use %(title)s.%(ext)s format to name files with video title
+	outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
+	
 	dl := ytdlp.New().
 		FormatSort("res,ext:mp4:m4a").
 		RecodeVideo("mp4").
 		NoPlaylist().
-		Output(job.OutputTemplate).
+		Output(outputTemplate).
 		ProgressFunc(100*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 			// Broadcast progress update
 			broadcastToSubscribers(job.ID, WSMessage{
