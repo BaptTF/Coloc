@@ -72,6 +72,7 @@ type URLRequest struct {
 	AutoPlay   bool   `json:"autoPlay,omitempty"`
 	VLCUrl     string `json:"vlcUrl,omitempty"`
 	BackendUrl string `json:"backendUrl,omitempty"`
+	Mode       string `json:"mode,omitempty"` // "stream" or "download"
 }
 
 type Response struct {
@@ -110,6 +111,7 @@ type DownloadJob struct {
 	AutoPlay       bool      `json:"autoPlay"`
 	VLCUrl         string    `json:"vlcUrl"`
 	BackendUrl     string    `json:"backendUrl"`
+	Mode           string    `json:"mode"` // "stream" or "download"
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
@@ -338,6 +340,9 @@ func main() {
 	// Start download worker
 	go downloadWorker()
 
+	// Start file watcher for video directory synchronization
+	go watchVideoDirectory()
+
 	// Servir les vidéos en static
 	fs := http.FileServer(http.Dir(videoDir))
 	http.Handle("/videos/", http.StripPrefix("/videos/", fs))
@@ -346,6 +351,8 @@ func main() {
 	http.HandleFunc("/queue", queueStatusHandler)
 	http.HandleFunc("/url", downloadURLHandler)
 	http.HandleFunc("/urlyt", downloadYouTubeHandler)
+	http.HandleFunc("/twitch", downloadTwitchHandler)
+	http.HandleFunc("/playurl", playURLHandler)
 	http.HandleFunc("/list", listHandler)
 	http.HandleFunc("/ws", wsHandler)
 	http.HandleFunc("/vlc/code", vlcCodeHandler)
@@ -467,6 +474,11 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default to "stream" if mode not specified
+	if req.Mode == "" {
+		req.Mode = "stream"
+	}
+
 	logrus.WithField("url", req.URL).Info("Ajout téléchargement YouTube à la file")
 
 	// Generate unique download ID
@@ -480,6 +492,7 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 		AutoPlay:       req.AutoPlay,
 		VLCUrl:         req.VLCUrl,
 		BackendUrl:     req.BackendUrl,
+		Mode:           req.Mode,
 		CreatedAt:      time.Now(),
 	}
 
@@ -502,6 +515,7 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 			"downloadId": downloadID,
 			"url":        req.URL,
 			"autoplay":   req.AutoPlay,
+			"mode":       req.Mode,
 		}).Info("Download job added to queue")
 
 		// Broadcast queue update to all clients
@@ -602,11 +616,10 @@ func autoPlayVideo(filename string, vlcUrl string, backendUrl string) {
 		return
 	}
 
-	// Construire l'URL de la vidéo avec proper path encoding
-	// filename already contains "/videos/", so just append to backendUrl
-	// Remove leading slash from filename if present to avoid double slash
+	// Construire l'URL de la vidéo
+	// filename already contains the video filename, prepend /videos/ for the URL
 	cleanFilename := strings.TrimPrefix(filename, "/")
-	videoPath := backendUrl + "/" + cleanFilename
+	videoPath := backendUrl + "/videos/" + cleanFilename
 
 	// Vérifier que la vidéo est accessible via HTTP avant de contacter VLC
 	// Extended wait time for debugging timing issues
@@ -618,29 +631,57 @@ func autoPlayVideo(filename string, vlcUrl string, backendUrl string) {
 		return
 	}
 
-	// VLC expects the path with encoded filename in the format:
-	// http%3A%2F%2F192.168.4.32%3A8080%2Fvideos%2FMe%2520at%2520the%2520zoo.m3u8
-	// Where %2520 is an encoded %20 (space)
-	
-	// Split to encode only the filename
-	lastSlash := strings.LastIndex(videoPath, "/")
-	baseURL := videoPath[:lastSlash+1]
-	videoFilename := videoPath[lastSlash+1:]
-	
-	// Encode the filename (spaces become %20, etc.)
-	encodedFilename := url.PathEscape(videoFilename)
-	
-	// Reconstruct the path with encoded filename
-	fullPath := baseURL + encodedFilename
-	
-	// Manually encode for query parameter to preserve %20 as %2520
-	// Replace special characters but keep the % from %20 as %25
-	encodedPath := strings.ReplaceAll(fullPath, "%", "%25")
-	encodedPath = strings.ReplaceAll(encodedPath, ":", "%3A")
-	encodedPath = strings.ReplaceAll(encodedPath, "/", "%2F")
-	
-	// Construct the final URL
-	playUrl := fmt.Sprintf("%s/play?id=-1&path=%s&type=stream", vlcUrl, encodedPath)
+	// Determine the VLC type based on file extension
+	var vlcType string
+	if strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
+		// Streaming file - use complex encoding
+		vlcType = "stream"
+		
+		// Split to encode only the filename
+		lastSlash := strings.LastIndex(videoPath, "/")
+		baseURL := videoPath[:lastSlash+1]
+		videoFilename := videoPath[lastSlash+1:]
+		
+		// Encode the filename (spaces become %20, etc.)
+		encodedFilename := url.PathEscape(videoFilename)
+		
+		// Reconstruct the path with encoded filename
+		fullPath := baseURL + encodedFilename
+		
+		// Manually encode for query parameter to preserve %20 as %2520
+		// Replace special characters but keep the % from %20 as %25
+		encodedPath := strings.ReplaceAll(fullPath, "%", "%25")
+		encodedPath = strings.ReplaceAll(encodedPath, ":", "%3A")
+		encodedPath = strings.ReplaceAll(encodedPath, "/", "%2F")
+		
+		// Construct the final URL
+		videoPath = encodedPath
+	} else {
+		// Direct file (MP4, etc.) - use same encoding as streaming files
+		vlcType = "stream" // VLC can handle direct URLs as stream
+		
+		// Split to encode only the filename
+		lastSlash := strings.LastIndex(videoPath, "/")
+		baseURL := videoPath[:lastSlash+1]
+		videoFilename := videoPath[lastSlash+1:]
+		
+		// Encode the filename (spaces become %20, etc.)
+		encodedFilename := url.PathEscape(videoFilename)
+		
+		// Reconstruct the path with encoded filename
+		fullPath := baseURL + encodedFilename
+		
+		// Manually encode for query parameter to preserve %20 as %2520
+		// Replace special characters but keep the % from %20 as %25
+		encodedPath := strings.ReplaceAll(fullPath, "%", "%25")
+		encodedPath = strings.ReplaceAll(encodedPath, ":", "%3A")
+		encodedPath = strings.ReplaceAll(encodedPath, "/", "%2F")
+		
+		// Construct the final URL
+		videoPath = encodedPath
+	}
+
+	playUrl := fmt.Sprintf("%s/play?id=-1&path=%s&type=%s", vlcUrl, videoPath, vlcType)
 
 	logrus.WithFields(logrus.Fields{
 		"filename": filename,
@@ -1214,7 +1255,8 @@ func downloadWorker() {
 		logrus.WithFields(logrus.Fields{
 			"downloadId": job.ID,
 			"url":        job.URL,
-		}).Info("Processing stream job")
+			"mode":       job.Mode,
+		}).Info("Processing download job")
 
 		// Update job status to processing
 		jobStatusesMutex.Lock()
@@ -1225,381 +1267,690 @@ func downloadWorker() {
 		jobStatusesMutex.Unlock()
 		broadcastQueueStatus()
 
-		// Notify subscribers that streaming is starting
-		broadcastToSubscribers(job.ID, WSMessage{
-			Type:       "queued",
-			DownloadID: job.ID,
-			Message:    "Streaming en file d'attente",
-		})
-
-		// Get video and audio URLs using yt-dlp
-		broadcastToSubscribers(job.ID, WSMessage{
-			Type:       "progress",
-			DownloadID: job.ID,
-			Message:    "Extraction du titre et URL vidéo...",
-		})
-
-		// Use -S vcodec:h264 to prefer h264 codec
-		dl := ytdlp.New().
-			GetTitle().
-			GetURL().
-			Format("bestvideo[ext=mp4]").
-			FormatSort("vcodec:h264").
-			NoPlaylist()
-
-		// Retry up to 3 times if format is not available
-		var output *ytdlp.Result
-		var err error
-		maxRetries := 3
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			output, err = dl.Run(context.TODO(), job.URL)
-			if err == nil {
-				break
-			}
-			
-			// Check if it's a "format not available" error
-			if strings.Contains(err.Error(), "Requested format is not available") {
-				logrus.WithFields(logrus.Fields{
-					"attempt": attempt,
-					"max":     maxRetries,
-				}).Warn("yt-dlp format not available, retrying...")
-				
-				if attempt < maxRetries {
-					time.Sleep(2 * time.Second) // Wait before retry
-					continue
-				}
-			}
-			break
-		}
-		
-		if err != nil {
-			logrus.WithError(err).Error("yt-dlp video URL extraction failed")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur extraction URL vidéo: %v", err),
-			})
-			// Update job status to error
-			jobStatusesMutex.Lock()
-			if status, exists := jobStatuses[job.ID]; exists {
-				status.Status = "error"
-				status.Error = fmt.Sprintf("Erreur extraction URL vidéo: %v", err)
-				now := time.Now()
-				status.CompletedAt = &now
-			}
-			jobStatusesMutex.Unlock()
-			broadcastQueueStatus()
-			// Notify that this job is done (failed)
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "completed",
-				DownloadID: job.ID,
-				Message:    "Job terminé avec erreur",
-			})
-			continue
-		}
-
-		// Parse the video output: title, then video URL
-		lines := strings.Split(strings.TrimSpace(output.Stdout), "\n")
-		logrus.WithFields(logrus.Fields{
-			"urlCount": len(lines),
-			"stdout":   output.Stdout[:200] + "...", // Truncate for logging
-		}).Info("yt-dlp video output received")
-
-		var title string
-		var videoURL string
-
-		if len(lines) == 2 {
-			// Title + video URL
-			title = strings.TrimSpace(lines[0])
-			videoURL = strings.TrimSpace(lines[1])
-		} else if len(lines) == 1 {
-			// No title, just video URL
-			videoURL = strings.TrimSpace(lines[0])
-			title = "" // Will fallback to job ID
+		// Handle different modes
+		if job.Mode == "download" {
+			processDownloadJob(job)
 		} else {
-			logrus.Error("Unexpected number of video output lines from yt-dlp")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    "Nombre inattendu de lignes vidéo de yt-dlp",
-			})
-			// Update job status to error
-			jobStatusesMutex.Lock()
-			if status, exists := jobStatuses[job.ID]; exists {
-				status.Status = "error"
-				status.Error = "Nombre inattendu de lignes vidéo de yt-dlp"
-				now := time.Now()
-				status.CompletedAt = &now
-			}
-			jobStatusesMutex.Unlock()
-			broadcastQueueStatus()
-			// Notify that this job is done (failed)
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "completed",
-				DownloadID: job.ID,
-				Message:    "Job terminé avec erreur",
-			})
-			continue
+			// Default to stream mode
+			processStreamJob(job)
 		}
+	}
+}
 
-		// Get audio URL
-		broadcastToSubscribers(job.ID, WSMessage{
-			Type:       "progress",
-			DownloadID: job.ID,
-			Message:    "Extraction de l'URL audio...",
+// processDownloadJob handles downloading videos as MP4 files
+func processDownloadJob(job *DownloadJob) {
+	logrus.WithField("downloadId", job.ID).Info("Processing download job")
+
+	// Notify subscribers that download is starting
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "progress",
+		DownloadID: job.ID,
+		Message:    "Téléchargement en cours...",
+	})
+
+	// Create yt-dlp command with progress callback using go-ytdlp library
+	dl := ytdlp.New().
+		FormatSort("res,ext:mp4:m4a").
+		RecodeVideo("mp4").
+		NoPlaylist().
+		Output(job.OutputTemplate).
+		ProgressFunc(100*time.Millisecond, func(update ytdlp.ProgressUpdate) {
+			// Broadcast progress update
+			broadcastToSubscribers(job.ID, WSMessage{
+				Type:       "progress",
+				DownloadID: job.ID,
+				Line:       fmt.Sprintf("%s @ %s", update.Status, update.PercentString()),
+				Percent:    update.Percent(),
+			})
 		})
 
-		dlAudio := ytdlp.New().
-			GetURL().
-			Format("bestaudio[ext=m4a]").
-			NoPlaylist()
-
-		outputAudio, err := dlAudio.Run(context.TODO(), job.URL)
-		if err != nil {
-			logrus.WithError(err).Error("yt-dlp audio URL extraction failed")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur extraction URL audio: %v", err),
-			})
-			// Update job status to error
-			jobStatusesMutex.Lock()
-			if status, exists := jobStatuses[job.ID]; exists {
-				status.Status = "error"
-				status.Error = fmt.Sprintf("Erreur extraction URL audio: %v", err)
-				now := time.Now()
-				status.CompletedAt = &now
-			}
-			jobStatusesMutex.Unlock()
-			broadcastQueueStatus()
-			// Notify that this job is done (failed)
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "completed",
-				DownloadID: job.ID,
-				Message:    "Job terminé avec erreur",
-			})
-			continue
-		}
-
-		audioURL := strings.TrimSpace(outputAudio.Stdout)
-		logrus.WithFields(logrus.Fields{
-			"audioURL": audioURL[:50] + "...",
-		}).Info("yt-dlp audio URL extracted successfully")
-
+	// Execute download
+	_, err := dl.Run(context.TODO(), job.URL)
+	if err != nil {
+		logrus.WithError(err).Error("yt-dlp download failed")
 		broadcastToSubscribers(job.ID, WSMessage{
-			Type:       "progress",
+			Type:       "error",
 			DownloadID: job.ID,
-			Message:    fmt.Sprintf("URLs extraites - Titre: %s", title),
+			Message:    fmt.Sprintf("Erreur yt-dlp: %v", err),
 		})
-
-		// Sanitize title for filename
-		sanitizedTitle := sanitizeFilename(title)
-		if sanitizedTitle == "" {
-			sanitizedTitle = job.ID // fallback to ID if title is empty
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"title":    title,
-			"sanitizedTitle": sanitizedTitle,
-			"videoURL": videoURL[:50] + "...",
-			"audioURL": audioURL[:50] + "...",
-		}).Info("Title and URLs extracted successfully")
-
-		// Create segments directory for this video
-		// Structure: /videos/segments/{jobID}/segment_*.ts
-		segmentSubDir := filepath.Join(videoDir, "segments", job.ID)
-		if err := os.MkdirAll(segmentSubDir, 0755); err != nil {
-			logrus.WithError(err).Error("Failed to create segments directory")
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur création dossier segments: %v", err),
-			})
-			// Update job status to error
-			jobStatusesMutex.Lock()
-			if status, exists := jobStatuses[job.ID]; exists {
-				status.Status = "error"
-				status.Error = fmt.Sprintf("Erreur création dossier segments: %v", err)
-				now := time.Now()
-				status.CompletedAt = &now
-			}
-			jobStatusesMutex.Unlock()
-			broadcastQueueStatus()
-			// Notify that this job is done (failed)
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "completed",
-				DownloadID: job.ID,
-				Message:    "Job terminé avec erreur",
-			})
-			continue
-		}
-
-		// Generate HLS stream name with full path
-		streamName := filepath.Join(videoDir, fmt.Sprintf("%s.m3u8", sanitizedTitle))
-		segmentPattern := filepath.Join(videoDir, "segments", job.ID, "segment_%03d.ts")
-
-		// Start HLS conversion with ffmpeg
-		// Note: This can take several minutes for long videos as ffmpeg downloads and converts
-		broadcastToSubscribers(job.ID, WSMessage{
-			Type:       "progress",
-			DownloadID: job.ID,
-			Message:    "Conversion HLS en cours (peut prendre plusieurs minutes pour les longues vidéos)...",
-		})
-		
-		// Update job status with more detailed progress
+		// Update job status to error
 		jobStatusesMutex.Lock()
 		if status, exists := jobStatuses[job.ID]; exists {
-			status.Progress = "Conversion HLS en cours (téléchargement + conversion)..."
+			status.Status = "error"
+			status.Error = fmt.Sprintf("Erreur yt-dlp: %v", err)
+			now := time.Now()
+			status.CompletedAt = &now
 		}
 		jobStatusesMutex.Unlock()
 		broadcastQueueStatus()
+		return
+	}
 
-		videoInput := ffmpeg_go.Input(videoURL)
-		audioInput := ffmpeg_go.Input(audioURL)
+	// Find the downloaded file
+	var newFileName string
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to read video directory")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    "Erreur lecture dossier videos après téléchargement",
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = "Erreur lecture dossier videos après téléchargement"
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		return
+	}
 
-		// Explicitly map video from first input and audio from second input
-		videoStream := videoInput.Video()
-		audioStream := audioInput.Audio()
-
-		// Start ffmpeg asynchronously so it doesn't block
-		cmd := ffmpeg_go.Output([]*ffmpeg_go.Stream{videoStream, audioStream}, streamName,
-			ffmpeg_go.KwArgs{
-				"c:v":                   "copy",
-				"c:a":                   "copy",
-				"f":                     "hls",
-				"hls_time":              "6",
-				"hls_list_size":         "0",
-				"hls_segment_filename":  segmentPattern,
-				"hls_base_url":          fmt.Sprintf("segments/%s/", job.ID),
-				"start_number":          "0",
-				"hls_flags":             "independent_segments",
-			}).Compile()
-
-		// Start ffmpeg process
-		err = cmd.Start()
+	var newestTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
 		if err != nil {
-			logrus.WithError(err).Error("ffmpeg failed to start")
-			broadcastToSubscribers(job.ID, WSMessage{
+			continue
+		}
+		if info.ModTime().After(newestTime) {
+			newestTime = info.ModTime()
+			newFileName = entry.Name()
+		}
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"url":      job.URL,
+		"new_file": newFileName,
+	}).Info("Video downloaded successfully")
+
+	// Auto-play if requested
+	if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" && newFileName != "" {
+		go autoPlayVideo(newFileName, job.VLCUrl, job.BackendUrl)
+	}
+
+	// Update job status to completed
+	jobStatusesMutex.Lock()
+	if status, exists := jobStatuses[job.ID]; exists {
+		status.Status = "completed"
+		status.Progress = "Téléchargement terminé"
+		now := time.Now()
+		status.CompletedAt = &now
+	}
+	jobStatusesMutex.Unlock()
+	broadcastQueueStatus()
+
+	// Notify completion
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "done",
+		DownloadID: job.ID,
+		File:       newFileName,
+		Message:    "Téléchargement terminé",
+	})
+
+	// Refresh video list
+	// Note: We can't call VideoManager.listVideos() here as it's frontend code
+	// The frontend will refresh when it receives the 'done' message
+
+	pruneVideos()
+}
+
+// downloadTwitchHandler handles Twitch streams using yt-dlp -g to get m3u8 URL
+func downloadTwitchHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req URLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "JSON invalide", http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		sendError(w, "URL manquante", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithField("url", req.URL).Info("Twitch - Extraction URL m3u8")
+
+	// Use yt-dlp to get the direct m3u8 URL using go-ytdlp library
+	dl := ytdlp.New().
+		GetURL().
+		Format("best").
+		NoPlaylist()
+
+	output, err := dl.Run(context.TODO(), req.URL)
+	if err != nil {
+		logrus.WithError(err).Error("yt-dlp URL extraction failed")
+		sendError(w, fmt.Sprintf("Erreur yt-dlp: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	m3u8URL := strings.TrimSpace(output.Stdout)
+	if m3u8URL == "" {
+		sendError(w, "URL m3u8 vide", http.StatusInternalServerError)
+		return
+	}
+
+	logrus.WithField("m3u8_url", m3u8URL).Info("Twitch m3u8 URL extracted successfully")
+
+	// Play directly with VLC if requested
+	if req.AutoPlay && req.VLCUrl != "" {
+		go playDirectURL(m3u8URL, req.VLCUrl)
+	}
+
+	sendSuccess(w, "URL Twitch extraite avec succès", m3u8URL)
+}
+
+// playURLHandler plays a direct URL on VLC
+func playURLHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req URLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "JSON invalide", http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		sendError(w, "URL manquante", http.StatusBadRequest)
+		return
+	}
+
+	if req.VLCUrl == "" {
+		sendError(w, "URL VLC manquante", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"url":     req.URL,
+		"vlc_url": req.VLCUrl,
+	}).Info("Direct URL play request")
+
+	// Play the URL directly on VLC
+	go playDirectURL(req.URL, req.VLCUrl)
+
+	sendSuccess(w, "Lecture lancée sur VLC", "")
+}
+
+// playDirectURL sends a direct URL to VLC for playback
+func playDirectURL(videoURL string, vlcUrl string) {
+	vlcSessionsMutex.RLock()
+	session, exists := vlcSessions[vlcUrl]
+	vlcSessionsMutex.RUnlock()
+
+	if !exists || !session.Authenticated {
+		logrus.WithField("vlc_url", vlcUrl).Warn("No authenticated VLC session for direct play")
+		return
+	}
+
+	// URL encode the direct URL
+	encodedURL := url.PathEscape(videoURL)
+
+	// Construct the VLC play URL for direct streaming
+	playUrl := fmt.Sprintf("%s/play?id=-1&path=%s&type=stream", vlcUrl, encodedURL)
+
+	logrus.WithFields(logrus.Fields{
+		"url":      videoURL,
+		"vlc_url":  vlcUrl,
+		"play_url": playUrl,
+	}).Info("Sending direct URL to VLC")
+
+	req, err := http.NewRequest("GET", playUrl, nil)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to create VLC play request")
+		return
+	}
+
+	resp, err := session.Client.Do(req)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to send play request to VLC")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		logrus.Info("Direct URL playback started successfully")
+	} else {
+		logrus.WithField("status", resp.StatusCode).Warn("VLC play request failed")
+	}
+}
+
+// processStreamJob handles streaming videos via HLS
+func processStreamJob(job *DownloadJob) {
+	logrus.WithField("downloadId", job.ID).Info("Processing stream job")
+
+	// Notify subscribers that streaming is starting
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "queued",
+		DownloadID: job.ID,
+		Message:    "Streaming en file d'attente",
+	})
+
+	// Get video and audio URLs using yt-dlp
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "progress",
+		DownloadID: job.ID,
+		Message:    "Extraction du titre et URL vidéo...",
+	})
+
+	// Use -S vcodec:h264 to prefer h264 codec
+	dl := ytdlp.New().
+		GetTitle().
+		GetURL().
+		Format("bestvideo[ext=mp4]").
+		FormatSort("vcodec:h264").
+		NoPlaylist()
+
+	// Retry up to 3 times if format is not available
+	var output *ytdlp.Result
+	var err error
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		output, err = dl.Run(context.TODO(), job.URL)
+		if err == nil {
+			break
+		}
+		
+		// Check if it's a "format not available" error
+		if strings.Contains(err.Error(), "Requested format is not available") {
+			logrus.WithFields(logrus.Fields{
+				"attempt": attempt,
+				"max":     maxRetries,
+			}).Warn("yt-dlp format not available, retrying...")
+			
+			if attempt < maxRetries {
+				time.Sleep(2 * time.Second) // Wait before retry
+				continue
+			}
+		}
+		break
+	}
+	
+	if err != nil {
+		logrus.WithError(err).Error("yt-dlp video URL extraction failed")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    fmt.Sprintf("Erreur extraction URL vidéo: %v", err),
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = fmt.Sprintf("Erreur extraction URL vidéo: %v", err)
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		// Notify that this job is done (failed)
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "completed",
+			DownloadID: job.ID,
+			Message:    "Job terminé avec erreur",
+		})
+		return
+	}
+
+	// Parse the video output: title, then video URL
+	lines := strings.Split(strings.TrimSpace(output.Stdout), "\n")
+	logrus.WithFields(logrus.Fields{
+		"urlCount": len(lines),
+		"stdout":   output.Stdout[:200] + "...", // Truncate for logging
+	}).Info("yt-dlp video output received")
+
+	var title string
+	var videoURL string
+
+	if len(lines) == 2 {
+		// Title + video URL
+		title = strings.TrimSpace(lines[0])
+		videoURL = strings.TrimSpace(lines[1])
+	} else if len(lines) == 1 {
+		// No title, just video URL
+		videoURL = strings.TrimSpace(lines[0])
+		title = "" // Will fallback to job ID
+	} else {
+		logrus.Error("Unexpected number of video output lines from yt-dlp")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    "Nombre inattendu de lignes vidéo de yt-dlp",
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = "Nombre inattendu de lignes vidéo de yt-dlp"
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		// Notify that this job is done (failed)
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "completed",
+			DownloadID: job.ID,
+			Message:    "Job terminé avec erreur",
+		})
+		return
+	}
+
+	// Get audio URL
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "progress",
+		DownloadID: job.ID,
+		Message:    "Extraction de l'URL audio...",
+	})
+
+	dlAudio := ytdlp.New().
+		GetURL().
+		Format("bestaudio[ext=m4a]").
+		NoPlaylist()
+
+	outputAudio, err := dlAudio.Run(context.TODO(), job.URL)
+	if err != nil {
+		logrus.WithError(err).Error("yt-dlp audio URL extraction failed")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    fmt.Sprintf("Erreur extraction URL audio: %v", err),
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = fmt.Sprintf("Erreur extraction URL audio: %v", err)
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		// Notify that this job is done (failed)
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "completed",
+			DownloadID: job.ID,
+			Message:    "Job terminé avec erreur",
+		})
+		return
+	}
+
+	audioURL := strings.TrimSpace(outputAudio.Stdout)
+	logrus.WithFields(logrus.Fields{
+		"audioURL": audioURL[:50] + "...",
+	}).Info("yt-dlp audio URL extracted successfully")
+
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "progress",
+		DownloadID: job.ID,
+		Message:    fmt.Sprintf("URLs extraites - Titre: %s", title),
+	})
+
+	// Sanitize title for filename
+	sanitizedTitle := sanitizeFilename(title)
+	if sanitizedTitle == "" {
+		sanitizedTitle = job.ID // fallback to ID if title is empty
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"title":    title,
+		"sanitizedTitle": sanitizedTitle,
+		"videoURL": videoURL[:50] + "...",
+		"audioURL": audioURL[:50] + "...",
+	}).Info("Title and URLs extracted successfully")
+
+	// Create segments directory for this video
+	// Structure: /videos/segments/{jobID}/segment_*.ts
+	segmentSubDir := filepath.Join(videoDir, "segments", job.ID)
+	if err := os.MkdirAll(segmentSubDir, 0755); err != nil {
+		logrus.WithError(err).Error("Failed to create segments directory")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    fmt.Sprintf("Erreur création dossier segments: %v", err),
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = fmt.Sprintf("Erreur création dossier segments: %v", err)
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		// Notify that this job is done (failed)
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "completed",
+			DownloadID: job.ID,
+			Message:    "Job terminé avec erreur",
+		})
+		return
+	}
+
+	// Generate HLS stream name with full path
+	streamName := filepath.Join(videoDir, fmt.Sprintf("%s.m3u8", sanitizedTitle))
+	segmentPattern := filepath.Join(videoDir, "segments", job.ID, "segment_%03d.ts")
+
+	// Start HLS conversion with ffmpeg
+	// Note: This can take several minutes for long videos as ffmpeg downloads and converts
+	broadcastToSubscribers(job.ID, WSMessage{
+		Type:       "progress",
+		DownloadID: job.ID,
+		Message:    "Conversion HLS en cours (peut prendre plusieurs minutes pour les longues vidéos)...",
+	})
+	
+	// Update job status with more detailed progress
+	jobStatusesMutex.Lock()
+	if status, exists := jobStatuses[job.ID]; exists {
+		status.Progress = "Conversion HLS en cours (téléchargement + conversion)..."
+	}
+	jobStatusesMutex.Unlock()
+	broadcastQueueStatus()
+
+	videoInput := ffmpeg_go.Input(videoURL)
+	audioInput := ffmpeg_go.Input(audioURL)
+
+	// Explicitly map video from first input and audio from second input
+	videoStream := videoInput.Video()
+	audioStream := audioInput.Audio()
+
+	// Start ffmpeg asynchronously so it doesn't block
+	cmd := ffmpeg_go.Output([]*ffmpeg_go.Stream{videoStream, audioStream}, streamName,
+		ffmpeg_go.KwArgs{
+			"c:v":                   "copy",
+			"c:a":                   "copy",
+			"f":                     "hls",
+			"hls_time":              "6",
+			"hls_list_size":         "0",
+			"hls_segment_filename":  segmentPattern,
+			"hls_base_url":          fmt.Sprintf("segments/%s/", job.ID),
+			"start_number":          "0",
+			"hls_flags":             "independent_segments",
+		}).Compile()
+
+	// Start ffmpeg process
+	err = cmd.Start()
+	if err != nil {
+		logrus.WithError(err).Error("ffmpeg failed to start")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    fmt.Sprintf("Erreur démarrage ffmpeg: %v", err),
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = fmt.Sprintf("Erreur démarrage ffmpeg: %v", err)
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "completed",
+			DownloadID: job.ID,
+			Message:    "Job terminé avec erreur",
+		})
+		return
+	}
+	
+	// Auto-play immediately after ffmpeg starts (for HLS streaming)
+	// The m3u8 file will be created within seconds and segments will be available
+	if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
+		// streamName is full path, extract just the filename for URL
+		streamURL := fmt.Sprintf("/videos/%s", filepath.Base(streamName))
+		// Wait a few seconds for the first segments to be created
+		go func(url, vlcUrl, backendUrl string) {
+			time.Sleep(5 * time.Second)
+			autoPlayVideo(url, vlcUrl, backendUrl)
+		}(streamURL, job.VLCUrl, job.BackendUrl)
+	}
+
+	// Wait for ffmpeg to finish in a goroutine
+	go func(jobID string, streamName string, cmd *exec.Cmd) {
+		err := cmd.Wait()
+		
+		if err != nil {
+			logrus.WithError(err).WithField("downloadId", jobID).Error("ffmpeg HLS conversion failed")
+			broadcastToSubscribers(jobID, WSMessage{
 				Type:       "error",
-				DownloadID: job.ID,
-				Message:    fmt.Sprintf("Erreur démarrage ffmpeg: %v", err),
+				DownloadID: jobID,
+				Message:    fmt.Sprintf("Erreur conversion HLS: %v", err),
 			})
 			// Update job status to error
 			jobStatusesMutex.Lock()
-			if status, exists := jobStatuses[job.ID]; exists {
+			if status, exists := jobStatuses[jobID]; exists {
 				status.Status = "error"
-				status.Error = fmt.Sprintf("Erreur démarrage ffmpeg: %v", err)
+				status.Error = fmt.Sprintf("Erreur conversion HLS: %v", err)
 				now := time.Now()
 				status.CompletedAt = &now
 			}
 			jobStatusesMutex.Unlock()
 			broadcastQueueStatus()
-			broadcastToSubscribers(job.ID, WSMessage{
+			broadcastToSubscribers(jobID, WSMessage{
 				Type:       "completed",
-				DownloadID: job.ID,
+				DownloadID: jobID,
 				Message:    "Job terminé avec erreur",
 			})
-			continue
-		}
-		
-		// Auto-play immediately after ffmpeg starts (for HLS streaming)
-		// The m3u8 file will be created within seconds and segments will be available
-		if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
-			// streamName is full path, extract just the filename for URL
-			streamURL := fmt.Sprintf("/videos/%s", filepath.Base(streamName))
-			// Wait a few seconds for the first segments to be created
-			go func(url, vlcUrl, backendUrl string) {
-				time.Sleep(5 * time.Second)
-				autoPlayVideo(url, vlcUrl, backendUrl)
-			}(streamURL, job.VLCUrl, job.BackendUrl)
-		}
-
-		// Wait for ffmpeg to finish in a goroutine
-		go func(jobID string, streamName string, cmd *exec.Cmd) {
-			err := cmd.Wait()
 			
-			if err != nil {
-				logrus.WithError(err).WithField("downloadId", jobID).Error("ffmpeg HLS conversion failed")
-				broadcastToSubscribers(jobID, WSMessage{
-					Type:       "error",
-					DownloadID: jobID,
-					Message:    fmt.Sprintf("Erreur conversion HLS: %v", err),
-				})
-				// Update job status to error
-				jobStatusesMutex.Lock()
-				if status, exists := jobStatuses[jobID]; exists {
-					status.Status = "error"
-					status.Error = fmt.Sprintf("Erreur conversion HLS: %v", err)
-					now := time.Now()
-					status.CompletedAt = &now
-				}
-				jobStatusesMutex.Unlock()
-				broadcastQueueStatus()
-				broadcastToSubscribers(jobID, WSMessage{
-					Type:       "completed",
-					DownloadID: jobID,
-					Message:    "Job terminé avec erreur",
-				})
-				
-				// Remove from job statuses after delay
-				time.Sleep(30 * time.Second)
-				jobStatusesMutex.Lock()
-				delete(jobStatuses, jobID)
-				jobStatusesMutex.Unlock()
-				broadcastQueueStatus()
-				return
-			}
-
-			// Streaming URL - streamName is full path, extract just the filename
-			streamURL := fmt.Sprintf("/videos/%s", filepath.Base(streamName))
-
-			logrus.WithFields(logrus.Fields{
-				"downloadId": jobID,
-				"streamURL":  streamURL,
-			}).Info("HLS stream created successfully")
-
-			// Prune old segments to keep only the 10 most recent
-			pruneSegments()
-
-			// Update job status to completed
-			jobStatusesMutex.Lock()
-			if status, exists := jobStatuses[jobID]; exists {
-				status.Status = "completed"
-				status.Progress = "Streaming prêt"
-				status.StreamURL = streamURL
-				now := time.Now()
-				status.CompletedAt = &now
-			}
-			jobStatusesMutex.Unlock()
-			broadcastQueueStatus()
-
-			// Notify completion with stream URL
-			broadcastToSubscribers(jobID, WSMessage{
-				Type:       "done",
-				DownloadID: jobID,
-				File:       streamURL,
-				Message:    "Streaming prêt",
-			})
-
-			// Notify that this job is done (success)
-			broadcastToSubscribers(jobID, WSMessage{
-				Type:       "completed",
-				DownloadID: jobID,
-				Message:    "Job terminé avec succès",
-			})
-			
-			// Remove from job statuses after 30 seconds
+			// Remove from job statuses after delay
 			time.Sleep(30 * time.Second)
 			jobStatusesMutex.Lock()
 			delete(jobStatuses, jobID)
 			jobStatusesMutex.Unlock()
 			broadcastQueueStatus()
-		}(job.ID, streamName, cmd)
+			return
+		}
 
-		// Continue to next job immediately - ffmpeg is running in background
+		// Streaming URL - streamName is full path, extract just the filename
+		streamURL := fmt.Sprintf("/videos/%s", filepath.Base(streamName))
+
+		logrus.WithFields(logrus.Fields{
+			"downloadId": jobID,
+			"streamURL":  streamURL,
+		}).Info("HLS stream created successfully")
+
+		// Prune old segments to keep only the 10 most recent
+		pruneSegments()
+
+		// Update job status to completed
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[jobID]; exists {
+			status.Status = "completed"
+			status.Progress = "Streaming prêt"
+			status.StreamURL = streamURL
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+
+		// Notify completion with stream URL
+		broadcastToSubscribers(jobID, WSMessage{
+			Type:       "done",
+			DownloadID: jobID,
+			File:       streamURL,
+			Message:    "Streaming prêt",
+		})
+
+		// Notify that this job is done (success)
+		broadcastToSubscribers(jobID, WSMessage{
+			Type:       "completed",
+			DownloadID: jobID,
+			Message:    "Job terminé avec succès",
+		})
+		
+		// Remove from job statuses after 30 seconds
+		time.Sleep(30 * time.Second)
+		jobStatusesMutex.Lock()
+		delete(jobStatuses, jobID)
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+	}(job.ID, streamName, cmd)
+
+	// Continue to next job immediately - ffmpeg is running in background
+}
+
+
+// watchVideoDirectory periodically monitors the video directory for changes
+func watchVideoDirectory() {
+	logrus.Info("Video directory watcher started")
+	
+	var lastFiles []string
+	
+	for {
+		// Get current file list
+		currentFiles := getVideoList()
+		
+		// Check if the list has changed
+		if !slicesEqual(lastFiles, currentFiles) {
+			logrus.WithFields(logrus.Fields{
+				"previousCount": len(lastFiles),
+				"currentCount":  len(currentFiles),
+			}).Info("Video directory changed, broadcasting update")
+			
+			// Broadcast update to all clients
+			msg := WSMessage{
+				Type:   "list",
+				Videos: currentFiles,
+			}
+			broadcastToAll(msg)
+			
+			// Update last known state
+			lastFiles = make([]string, len(currentFiles))
+			copy(lastFiles, currentFiles)
+		}
+		
+		// Wait 2 seconds before checking again
+		time.Sleep(2 * time.Second)
 	}
 }
 
+// slicesEqual compares two string slices for equality
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // sanitizeFilename cleans a string to make it safe for use as a filename
 func sanitizeFilename(filename string) string {

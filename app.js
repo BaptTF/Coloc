@@ -3,6 +3,8 @@ const CONFIG = {
   endpoints: {
     direct: '/url',
     youtube: '/urlyt',
+    twitch: '/twitch',
+    playurl: '/playurl',
     list: '/list',
     vlcCode: '/vlc/code',
     vlcVerify: '/vlc/verify-code',
@@ -14,6 +16,7 @@ const CONFIG = {
     backendUrl: '#backendUrl',
     vlcUrl: '#vlcUrl',
     videoUrl: '#videoUrl',
+    directUrl: '#directUrl',
     autoPlay: '#autoPlay',
     vlcStatus: '#vlcStatus',
     videosGrid: '#videosGrid',
@@ -769,7 +772,7 @@ class ModalManager {
 
 // ===== VIDEO MANAGEMENT =====
 class VideoManager {
-  static async download(endpoint, type) {
+  static async download(endpoint, type, mode = 'stream') {
     const url = elements.videoUrl?.value?.trim();
     if (!url) {
       toast.show('Veuillez entrer une URL', 'error');
@@ -787,6 +790,11 @@ class VideoManager {
         backendUrl: elements.backendUrl?.value?.trim() || ''
       };
 
+      // Add mode for YouTube downloads
+      if (endpoint === CONFIG.endpoints.youtube) {
+        requestData.mode = mode;
+      }
+
       const response = await ApiClient.post(endpoint, requestData);
       
       if (response.success) {
@@ -802,6 +810,76 @@ class VideoManager {
           // For direct downloads, refresh video list immediately
           VideoManager.listVideos();
         }
+      } else {
+        toast.show(`Erreur: ${response.message}`, 'error');
+      }
+    } catch (error) {
+      toast.show(`Erreur: ${error.message}`, 'error');
+    } finally {
+      setLoadingState(false);
+    }
+  }
+
+  static async downloadTwitch() {
+    const url = elements.videoUrl?.value?.trim();
+    if (!url) {
+      toast.show('Veuillez entrer une URL Twitch', 'error');
+      return;
+    }
+
+    setLoadingState(true);
+    toast.clear();
+
+    try {
+      const requestData = {
+        url: url,
+        autoPlay: elements.autoPlay?.checked || false,
+        vlcUrl: elements.vlcUrl?.value?.trim() || '',
+        backendUrl: elements.backendUrl?.value?.trim() || ''
+      };
+
+      const response = await ApiClient.post(CONFIG.endpoints.twitch, requestData);
+      
+      if (response.success) {
+        toast.show(`${response.message}`, 'success');
+        elements.videoUrl.value = '';
+      } else {
+        toast.show(`Erreur: ${response.message}`, 'error');
+      }
+    } catch (error) {
+      toast.show(`Erreur: ${error.message}`, 'error');
+    } finally {
+      setLoadingState(false);
+    }
+  }
+
+  static async playDirectUrl() {
+    const url = elements.directUrl?.value?.trim();
+    if (!url) {
+      toast.show('Veuillez entrer une URL', 'error');
+      return;
+    }
+
+    const vlcUrl = elements.vlcUrl?.value?.trim();
+    if (!vlcUrl) {
+      toast.show('URL VLC requise', 'error');
+      return;
+    }
+
+    setLoadingState(true);
+    toast.clear();
+
+    try {
+      const requestData = {
+        url: url,
+        vlcUrl: vlcUrl
+      };
+
+      const response = await ApiClient.post(CONFIG.endpoints.playurl, requestData);
+      
+      if (response.success) {
+        toast.show(`${response.message}`, 'success');
+        elements.directUrl.value = '';
       } else {
         toast.show(`Erreur: ${response.message}`, 'error');
       }
@@ -880,14 +958,34 @@ class VideoManager {
 function setupEventListeners() {
   // Download buttons
   const directBtn = document.getElementById('downloadDirect');
-  const youtubeBtn = document.getElementById('downloadYoutube');
+  const youtubeStreamBtn = document.getElementById('downloadYoutubeStream');
+  const youtubeDownloadBtn = document.getElementById('downloadYoutubeDownload');
+  const twitchBtn = document.getElementById('downloadTwitch');
+  const playDirectBtn = document.getElementById('playDirect');
+  const playDirectUrlBtn = document.getElementById('playDirectUrl');
   
   if (directBtn) {
     directBtn.onclick = () => VideoManager.download(CONFIG.endpoints.direct, 'direct');
   }
   
-  if (youtubeBtn) {
-    youtubeBtn.onclick = () => VideoManager.download(CONFIG.endpoints.youtube, 'youtube');
+  if (youtubeStreamBtn) {
+    youtubeStreamBtn.onclick = () => VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
+  }
+  
+  if (youtubeDownloadBtn) {
+    youtubeDownloadBtn.onclick = () => VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'download');
+  }
+  
+  if (twitchBtn) {
+    twitchBtn.onclick = VideoManager.downloadTwitch;
+  }
+  
+  if (playDirectBtn) {
+    playDirectBtn.onclick = () => VideoManager.download(CONFIG.endpoints.direct, 'direct');
+  }
+  
+  if (playDirectUrlBtn) {
+    playDirectUrlBtn.onclick = VideoManager.playDirectUrl;
   }
 
   // VLC buttons
@@ -918,7 +1016,16 @@ function setupEventListeners() {
   if (elements.videoUrl) {
     elements.videoUrl.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        VideoManager.download(CONFIG.endpoints.youtube, 'youtube');
+        VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
+      }
+    });
+  }
+
+  // Enter key for direct URL
+  if (elements.directUrl) {
+    elements.directUrl.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        VideoManager.playDirectUrl();
       }
     });
   }

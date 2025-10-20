@@ -8,6 +8,7 @@
   --danger-color: #ef4444;
   --warning-color: #f59e0b;
   --info-color: #3b82f6;
+  --purple-color: #8b5cf6;
   
   --text-primary: #0f172a;
   --text-secondary: #64748b;
@@ -269,6 +270,16 @@ label {
 
 .btn-danger:hover:not(:disabled) {
   background: #dc2626;
+  transform: translateY(-1px);
+}
+
+.btn-purple {
+  background: var(--purple-color);
+  color: white;
+}
+
+.btn-purple:hover:not(:disabled) {
+  background: #7c3aed;
   transform: translateY(-1px);
 }
 
