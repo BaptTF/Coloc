@@ -448,6 +448,8 @@ class DownloadManager {
     
     // Use progress message instead of old message field
     const displayMessage = download.progress || download.message || 'Traitement en cours';
+    const showProgressBar = download.status === 'downloading' || download.status === 'completed' || download.status === 'error';
+    const percent = download.percent || 0;
     
     downloadEl.innerHTML = `
       <div class="download-header">
@@ -458,16 +460,16 @@ class DownloadManager {
       </div>
       
       <div class="download-progress">
-        ${download.status === 'completed' || download.status === 'error' ? `
+        ${showProgressBar ? `
           <div class="progress-bar">
-            <div class="progress-fill ${download.status === 'completed' ? 'completed' : ''}" 
-                 style="width: ${download.percent}%"></div>
+            <div class="progress-fill ${download.status === 'completed' ? 'completed' : download.status === 'downloading' ? 'active' : ''}" 
+                 style="width: ${percent}%"></div>
           </div>
         ` : ''}
         <div class="progress-text">
-          <span>${displayMessage}</span>
-          ${(download.status === 'completed' || download.status === 'error') ? 
-            `<span>${download.percent.toFixed(1)}%</span>` : ''}
+          <span class="progress-message">${displayMessage}</span>
+          ${showProgressBar && percent > 0 ? 
+            `<span class="progress-percent">${percent.toFixed(1)}%</span>` : ''}
         </div>
       </div>
       
@@ -496,6 +498,7 @@ class DownloadManager {
     const statusTexts = {
       queued: 'En file',
       processing: 'Traitement',
+      downloading: 'Téléchargement',
       completed: 'Terminé',
       error: 'Erreur'
     };

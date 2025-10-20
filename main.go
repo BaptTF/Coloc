@@ -132,9 +132,7 @@ var (
 	jobStatusesMutex sync.RWMutex
 	wsClients        = make(map[*WSClient]bool)
 	wsClientsMutex   sync.RWMutex
-	subscribers      = make(map[string]map[*WSClient]bool) // downloadId -> clients
-	subscribersMutex sync.RWMutex
-	upgrader         = websocket.Upgrader{
+	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Allow all origins for development
 		},
@@ -1060,18 +1058,6 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		wsClientsMutex.Lock()
 		delete(wsClients, client)
 		wsClientsMutex.Unlock()
-
-		// Remove from all subscriptions
-		subscribersMutex.Lock()
-		for downloadId := range subscribers {
-			if clientMap, exists := subscribers[downloadId]; exists {
-				delete(clientMap, client)
-				if len(clientMap) == 0 {
-					delete(subscribers, downloadId)
-				}
-			}
-		}
-		subscribersMutex.Unlock()
 	}()
 
 	logrus.Info("WebSocket client connected")
@@ -1093,28 +1079,6 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		}).Info("WebSocket message received")
 
 		switch msg.Action {
-		case "subscribe":
-			if msg.DownloadID != "" {
-				subscribersMutex.Lock()
-				if subscribers[msg.DownloadID] == nil {
-					subscribers[msg.DownloadID] = make(map[*WSClient]bool)
-				}
-				subscribers[msg.DownloadID][client] = true
-				subscribersMutex.Unlock()
-				logrus.WithField("downloadId", msg.DownloadID).Info("Client subscribed to download")
-			}
-		case "unsubscribe":
-			if msg.DownloadID != "" {
-				subscribersMutex.Lock()
-				if clientMap, exists := subscribers[msg.DownloadID]; exists {
-					delete(clientMap, client)
-					if len(clientMap) == 0 {
-						delete(subscribers, msg.DownloadID)
-					}
-				}
-				subscribersMutex.Unlock()
-				logrus.WithField("downloadId", msg.DownloadID).Info("Client unsubscribed from download")
-			}
 		case "list":
 			// Send current video list
 			files := getVideoList()
@@ -1154,15 +1118,10 @@ func (c *WSClient) send(msg WSMessage) {
 	}
 }
 
-// Broadcast message to subscribers of a specific download
+// Broadcast message to subscribers of a specific download (now just broadcasts to all)
+// Kept for backward compatibility but simplified - everyone should always be in sync
 func broadcastToSubscribers(downloadId string, msg WSMessage) {
-	subscribersMutex.RLock()
-	if clientMap, exists := subscribers[downloadId]; exists {
-		for client := range clientMap {
-			go client.send(msg)
-		}
-	}
-	subscribersMutex.RUnlock()
+	broadcastToAll(msg)
 }
 
 // Broadcast message to all WebSocket clients
@@ -1316,23 +1275,141 @@ func processDownloadJob(job *DownloadJob) {
 	// Use %(title)s.%(ext)s format to name files with video title
 	outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
 	
+	// Track last broadcast time to throttle updates
+	var lastBroadcast time.Time
+	var lastPercent float64
+	
 	dl := ytdlp.New().
 		FormatSort("res,ext:mp4:m4a").
-		RecodeVideo("mp4").
+		MergeOutputFormat("mp4").
 		NoPlaylist().
 		Output(outputTemplate).
-		ProgressFunc(100*time.Millisecond, func(update ytdlp.ProgressUpdate) {
-			// Broadcast progress update
-			broadcastToSubscribers(job.ID, WSMessage{
-				Type:       "progress",
-				DownloadID: job.ID,
-				Line:       fmt.Sprintf("%s @ %s", update.Status, update.PercentString()),
-				Percent:    update.Percent(),
-			})
+		Progress().
+		Newline().
+		ProgressFunc(500*time.Millisecond, func(update ytdlp.ProgressUpdate) {
+			// Log that callback was called
+			logrus.WithFields(logrus.Fields{
+				"status":          update.Status,
+				"percent":         update.Percent(),
+				"downloadedBytes": update.DownloadedBytes,
+				"totalBytes":      update.TotalBytes,
+			}).Info("ProgressFunc callback called")
+			
+			// Build detailed progress message
+			var progressMsg string
+			
+			switch update.Status {
+			case ytdlp.ProgressStatusDownloading:
+				// Show download progress with speed and ETA
+				speed := ""
+				if !update.Started.IsZero() && update.DownloadedBytes > 0 {
+					elapsed := time.Since(update.Started).Seconds()
+					if elapsed > 0 {
+						bytesPerSec := float64(update.DownloadedBytes) / elapsed
+						speed = fmt.Sprintf(" @ %.2f MiB/s", bytesPerSec/1024/1024)
+					}
+				}
+				
+				eta := ""
+				if update.ETA() > 0 {
+					eta = fmt.Sprintf(" ETA %s", update.ETA().Round(time.Second))
+				}
+				
+				sizeInfo := ""
+				if update.TotalBytes > 0 {
+					sizeInfo = fmt.Sprintf(" (%.2f/%.2f MiB)", 
+						float64(update.DownloadedBytes)/1024/1024,
+						float64(update.TotalBytes)/1024/1024)
+				} else if update.DownloadedBytes > 0 {
+					sizeInfo = fmt.Sprintf(" (%.2f MiB)", float64(update.DownloadedBytes)/1024/1024)
+				}
+				
+				fragmentInfo := ""
+				if update.FragmentCount > 0 {
+					fragmentInfo = fmt.Sprintf(" [fragment %d/%d]", update.FragmentIndex, update.FragmentCount)
+				}
+				
+				progressMsg = fmt.Sprintf("Téléchargement: %s%s%s%s%s", 
+					update.PercentString(), sizeInfo, speed, eta, fragmentInfo)
+					
+			case ytdlp.ProgressStatusFinished:
+				progressMsg = "Téléchargement terminé, post-traitement en cours..."
+				
+			case ytdlp.ProgressStatusError:
+				progressMsg = "Erreur lors du téléchargement"
+				
+			case ytdlp.ProgressStatusStarting:
+				progressMsg = "Démarrage du téléchargement..."
+				
+			default:
+				progressMsg = fmt.Sprintf("Status: %s @ %s", update.Status, update.PercentString())
+			}
+			
+			// Update job status progress (always update local state)
+			jobStatusesMutex.Lock()
+			if status, exists := jobStatuses[job.ID]; exists {
+				status.Progress = progressMsg
+				// Update status to "downloading" when we get download progress
+				if update.Status == ytdlp.ProgressStatusDownloading && status.Status != "downloading" {
+					status.Status = "downloading"
+				}
+			}
+			jobStatusesMutex.Unlock()
+			
+			// Throttle broadcasts: only broadcast if 1 second has passed OR percent changed by 1% OR status changed
+			currentPercent := update.Percent()
+			timeSinceLastBroadcast := time.Since(lastBroadcast)
+			percentDiff := currentPercent - lastPercent
+			
+			shouldBroadcast := timeSinceLastBroadcast >= 1*time.Second || 
+				percentDiff >= 1.0 || 
+				update.Status != ytdlp.ProgressStatusDownloading
+			
+			if shouldBroadcast {
+				logrus.WithFields(logrus.Fields{
+					"downloadId": job.ID,
+					"message":    progressMsg,
+					"percent":    currentPercent,
+				}).Info("Broadcasting progress update")
+				
+				broadcastToSubscribers(job.ID, WSMessage{
+					Type:       "progress",
+					DownloadID: job.ID,
+					Message:    progressMsg,
+					Percent:    currentPercent,
+				})
+				lastBroadcast = time.Now()
+				lastPercent = currentPercent
+			}
 		})
 
 	// Execute download
-	_, err := dl.Run(context.TODO(), job.URL)
+	logrus.Info("Starting yt-dlp download with progress tracking...")
+	result, err := dl.Run(context.TODO(), job.URL)
+	
+	// Log result details
+	if result != nil {
+		logrus.WithFields(logrus.Fields{
+			"exitCode":   result.ExitCode,
+			"stdoutLen":  len(result.Stdout),
+			"stderrLen":  len(result.Stderr),
+			"outputLogs": len(result.OutputLogs),
+		}).Info("yt-dlp execution completed")
+		
+		// Log some output logs if available
+		if len(result.OutputLogs) > 0 {
+			logrus.WithField("logCount", len(result.OutputLogs)).Info("yt-dlp output logs available")
+			for i, log := range result.OutputLogs {
+				if i < 5 { // Log first 5 entries
+					logrus.WithFields(logrus.Fields{
+						"line": log.Line,
+						"pipe": log.Pipe,
+					}).Info("yt-dlp output log sample")
+				}
+			}
+		}
+	}
+	
 	if err != nil {
 		logrus.WithError(err).Error("yt-dlp download failed")
 		broadcastToSubscribers(job.ID, WSMessage{

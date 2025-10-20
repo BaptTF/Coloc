@@ -596,6 +596,11 @@ label {
   border-left: 4px solid var(--accent-color);
 }
 
+.download-item.downloading {
+  border-left: 4px solid var(--accent-color);
+  background: linear-gradient(to right, var(--bg-secondary) 0%, rgb(249 115 22 / 0.02) 100%);
+}
+
 .download-status.processing {
   background: rgb(249 115 22 / 0.1);
   color: var(--accent-color);
@@ -696,10 +701,29 @@ label {
   border-radius: var(--radius-sm);
   transition: width 0.3s ease;
   width: 0%;
+  position: relative;
+}
+
+.progress-fill.active {
+  background: linear-gradient(90deg, 
+    var(--accent-color) 0%, 
+    #fb923c 50%, 
+    var(--accent-color) 100%);
+  background-size: 200% 100%;
+  animation: progressShimmer 2s ease-in-out infinite;
 }
 
 .progress-fill.completed {
   background: var(--success-color);
+}
+
+@keyframes progressShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .progress-text {
@@ -709,6 +733,22 @@ label {
   margin-top: 0.5rem;
   font-size: 0.8rem;
   color: var(--text-secondary);
+  gap: 1rem;
+}
+
+.progress-message {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.progress-percent {
+  font-weight: 600;
+  color: var(--accent-color);
+  font-size: 0.875rem;
+  white-space: nowrap;
 }
 
 .download-log {
