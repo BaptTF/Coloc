@@ -210,7 +210,7 @@ class WebSocketManager {
         state.reconnectAttempts = 0;
         WebSocketManager.updateStatus('connected');
         
-        // Subscribe to all downloads
+        // Subscribe to all downloads and get current queue status
         WebSocketManager.send({ action: 'subscribeAll' });
       };
       
@@ -220,6 +220,7 @@ class WebSocketManager {
           WebSocketManager.handleMessage(message);
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error);
+          console.error('Raw message data:', event.data);
         }
       };
       
@@ -254,7 +255,13 @@ class WebSocketManager {
   }
 
   static handleMessage(message) {
-    console.log('WebSocket message:', message);
+    // Defensive check for message structure
+    if (!message || typeof message !== 'object') {
+      console.warn('Invalid message received:', message);
+      return;
+    }
+
+    console.log('WebSocket message received:', message);
     
     switch (message.type) {
       case 'queued':
@@ -266,7 +273,7 @@ class WebSocketManager {
       case 'progress':
         DownloadManager.updateDownload(message.downloadId, {
           status: 'downloading',
-          line: message.line,
+          progress: message.message, // Use the progress message from backend
           percent: message.percent || 0
         });
         break;
@@ -285,6 +292,16 @@ class WebSocketManager {
           status: 'error',
           message: message.message
         });
+        break;
+      case 'completed':
+        // Job completed (either success or error) - update the queue display
+        DownloadManager.updateDownload(message.downloadId, {
+          status: message.message.includes('succès') ? 'completed' : 'error'
+        });
+        break;
+      case 'queueStatus':
+        // Full queue status update - replace entire queue
+        DownloadManager.updateQueueStatus(message.queue || []);
         break;
       case 'list':
         VideoManager.renderVideoGrid(message.videos);
@@ -316,9 +333,8 @@ class DownloadManager {
       id: downloadId,
       url: url,
       status: 'queued',
+      progress: 'En attente de traitement',
       percent: 0,
-      message: 'En file d\'attente...',
-      log: [],
       createdAt: new Date()
     };
     
@@ -336,8 +352,9 @@ class DownloadManager {
     // Update download object
     Object.assign(download, updates);
     
-    // Add line to log if provided
+    // Add line to log if provided (for backward compatibility)
     if (updates.line) {
+      if (!download.log) download.log = [];
       download.log.push({
         timestamp: new Date(),
         line: updates.line
@@ -346,6 +363,73 @@ class DownloadManager {
     
     // Re-render the download item
     DownloadManager.renderDownload(download);
+  }
+
+  static updateQueueStatus(queueData) {
+    try {
+      // Check if queueData is valid
+      if (!queueData || !Array.isArray(queueData)) {
+        console.warn('Invalid queue data received:', queueData);
+        return;
+      }
+
+      // Get current job IDs in the queue
+      const currentJobIds = new Set(queueData
+        .filter(jobStatus => jobStatus && jobStatus.job && jobStatus.job.id)
+        .map(jobStatus => jobStatus.job.id));
+      
+      // Remove jobs that are no longer in the queue (finished/removed)
+      for (const [jobId, download] of state.downloads.entries()) {
+        if (!currentJobIds.has(jobId) && (download.status === 'completed' || download.status === 'error')) {
+          // Job finished and is no longer in queue - remove from display after a delay
+          setTimeout(() => {
+            const downloadEl = document.getElementById(`download-${jobId}`);
+            if (downloadEl) downloadEl.remove();
+            state.downloads.delete(jobId);
+            
+            // Hide progress section if no active downloads
+            if (state.downloads.size === 0) {
+              DownloadManager.hideProgressSection();
+            }
+          }, 3000); // Keep completed/error jobs visible for 3 seconds
+        }
+      }
+      
+      // Update or add jobs from queue status
+      queueData.forEach(jobStatus => {
+        // Validate jobStatus structure
+        if (!jobStatus || !jobStatus.job || !jobStatus.job.id || jobStatus.job.id.trim() === '') {
+          console.warn('Invalid jobStatus received:', jobStatus);
+          return;
+        }
+
+        const download = {
+          id: jobStatus.job.id,
+          url: jobStatus.job.url || '',
+          status: jobStatus.status || 'queued',
+          progress: jobStatus.progress || 'Traitement en cours',
+          percent: jobStatus.status === 'completed' ? 100 : 
+                  jobStatus.status === 'error' ? 0 : 0, // Don't show fake progress
+          error: jobStatus.error,
+          streamUrl: jobStatus.streamUrl,
+          completedAt: jobStatus.completedAt ? new Date(jobStatus.completedAt) : null,
+          createdAt: jobStatus.job.createdAt ? new Date(jobStatus.job.createdAt) : new Date()
+        };
+        
+        state.downloads.set(jobStatus.job.id, download);
+        DownloadManager.renderDownload(download);
+      });
+      
+      // Show progress section if there are active downloads
+      const hasActiveDownloads = Array.from(state.downloads.values())
+        .some(d => d.status === 'queued' || d.status === 'processing');
+      
+      if (hasActiveDownloads) {
+        DownloadManager.showProgressSection();
+      }
+    } catch (error) {
+      console.error('Error in updateQueueStatus:', error);
+    }
   }
 
   static renderDownload(download) {
@@ -360,6 +444,9 @@ class DownloadManager {
     // Update classes based on status
     downloadEl.className = `download-item ${download.status}`;
     
+    // Use progress message instead of old message field
+    const displayMessage = download.progress || download.message || 'Traitement en cours';
+    
     downloadEl.innerHTML = `
       <div class="download-header">
         <div class="download-url" title="${download.url}">${download.url}</div>
@@ -369,23 +456,33 @@ class DownloadManager {
       </div>
       
       <div class="download-progress">
-        <div class="progress-bar">
-          <div class="progress-fill ${download.status === 'completed' ? 'completed' : ''}" 
-               style="width: ${download.percent}%"></div>
-        </div>
+        ${download.status === 'completed' || download.status === 'error' ? `
+          <div class="progress-bar">
+            <div class="progress-fill ${download.status === 'completed' ? 'completed' : ''}" 
+                 style="width: ${download.percent}%"></div>
+          </div>
+        ` : ''}
         <div class="progress-text">
-          <span>${download.message}</span>
-          <span>${download.percent.toFixed(1)}%</span>
+          <span>${displayMessage}</span>
+          ${(download.status === 'completed' || download.status === 'error') ? 
+            `<span>${download.percent.toFixed(1)}%</span>` : ''}
         </div>
       </div>
       
-      ${download.log.length > 0 ? `
+      ${download.error ? `
+        <div class="download-error">
+          <div class="error-icon">⚠️</div>
+          <div class="error-message">${download.error}</div>
+        </div>
+      ` : ''}
+      
+      ${download.log && download.log.length > 0 ? `
         <div class="download-log">${download.log.map(entry => entry.line).join('\n')}</div>
       ` : ''}
       
-      ${download.status === 'completed' && download.file ? `
+      ${(download.status === 'completed' && download.streamUrl) ? `
         <div class="download-actions">
-          <button class="btn btn-accent btn-sm" onclick="VlcManager.playVideo('${download.file}')">
+          <button class="btn btn-accent btn-sm" onclick="VlcManager.playVideo('${download.streamUrl}')">
             ▶ Lancer sur VLC
           </button>
         </div>
@@ -396,7 +493,7 @@ class DownloadManager {
   static getStatusText(status) {
     const statusTexts = {
       queued: 'En file',
-      downloading: 'Téléchargement',
+      processing: 'Traitement',
       completed: 'Terminé',
       error: 'Erreur'
     };
@@ -696,15 +793,11 @@ class VideoManager {
         toast.show(`${response.message}`, 'success');
         elements.videoUrl.value = '';
         
-        // For YouTube downloads, create download tracking
-        if (endpoint === CONFIG.endpoints.youtube && response.file) {
-          DownloadManager.createDownload(response.file, url);
-          
-          // Subscribe to this specific download
-          WebSocketManager.send({
-            action: 'subscribe',
-            downloadId: response.file
-          });
+        // For YouTube downloads, the backend now handles queue management
+        // We don't need to create download tracking here anymore
+        if (endpoint === CONFIG.endpoints.youtube) {
+          // The WebSocket will send us queue updates automatically
+          toast.show('Téléchargement ajouté à la file d\'attente', 'info');
         } else {
           // For direct downloads, refresh video list immediately
           VideoManager.listVideos();

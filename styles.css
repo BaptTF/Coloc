@@ -581,8 +581,36 @@ label {
   border-left: 4px solid var(--info-color);
 }
 
-.download-item.downloading {
+.download-item.processing {
   border-left: 4px solid var(--accent-color);
+}
+
+.download-status.processing {
+  background: rgb(249 115 22 / 0.1);
+  color: var(--accent-color);
+}
+
+.download-error {
+  background: rgb(239 68 68 / 0.05);
+  border: 1px solid rgb(239 68 68 / 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.error-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.error-message {
+  font-size: 0.875rem;
+  color: var(--danger-color);
+  line-height: 1.4;
 }
 
 .download-item.completed {
