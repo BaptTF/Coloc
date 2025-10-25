@@ -1286,6 +1286,8 @@ func processDownloadJob(job *DownloadJob) {
 		Output(outputTemplate).
 		Progress().
 		Newline().
+		SponsorblockMark("all").
+		SponsorblockRemove("sponsor").
 		ProgressFunc(500*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 			// Log that callback was called
 			logrus.WithFields(logrus.Fields{
