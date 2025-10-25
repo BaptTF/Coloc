@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o video-server main
 RUN ./video-server install-tools
 
 # Stage 2: Final minimal image
-FROM debian:bookworm-slim
+FROM denoland/deno:debian
 
 # Install ca-certificates for HTTPS downloads
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*

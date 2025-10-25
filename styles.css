@@ -326,9 +326,19 @@ label {
   color: var(--danger-color);
 }
 
-.status-connectable {
+.status-updating {
   background: rgb(245 158 11 / 0.1);
   color: var(--warning-color);
+}
+
+.status-updated {
+  background: rgb(16 185 129 / 0.1);
+  color: var(--success-color);
+}
+
+.status-update-error {
+  background: rgb(239 68 68 / 0.1);
+  color: var(--danger-color);
 }
 
 .status-dot {

@@ -19,6 +19,7 @@ const CONFIG = {
     videoUrl: '#videoUrl',
     autoPlay: '#autoPlay',
     vlcStatus: '#vlcStatus',
+    ytdlpStatus: '#ytdlpStatus',
     videosGrid: '#videosGrid',
     vlcModal: '#vlcModal',
     vlcCode: '#vlcCode',
@@ -309,6 +310,22 @@ class WebSocketManager {
       case 'list':
         VideoManager.renderVideoGrid(message.videos);
         break;
+      case 'ytdlp_update':
+        // Handle yt-dlp update status messages
+        StatusManager.updateYtdlpStatus('updating', message.message);
+        // Show toast notification for important update messages
+        if (message.message.includes('mis à jour')) {
+          toast.show(message.message, 'success');
+          StatusManager.updateYtdlpStatus('updated');
+        } else if (message.message.includes('Erreur')) {
+          toast.show(message.message, 'error');
+          StatusManager.updateYtdlpStatus('error');
+        } else if (message.message.includes('à jour')) {
+          StatusManager.updateYtdlpStatus('uptodate');
+        } else {
+          StatusManager.updateYtdlpStatus('checking', message.message);
+        }
+        break;
     }
   }
 
@@ -573,6 +590,46 @@ class StatusManager {
     if (loginBtn) {
       loginBtn.textContent = state.vlcAuthenticated ? 'Reconnexion' : 'Se connecter';
     }
+  }
+
+  static updateYtdlpStatus(status, message = '') {
+    const statusEl = elements.ytdlpStatus;
+    if (!statusEl) return;
+
+    let className, text;
+    
+    switch(status) {
+      case 'checking':
+        className = 'status status-updating';
+        text = 'Vérification...';
+        break;
+      case 'updating':
+        className = 'status status-updating';
+        text = 'Mise à jour...';
+        break;
+      case 'updated':
+        className = 'status status-updated';
+        text = 'À jour';
+        break;
+      case 'uptodate':
+        className = 'status status-updated';
+        text = 'À jour';
+        break;
+      case 'error':
+        className = 'status status-update-error';
+        text = 'Erreur';
+        break;
+      default:
+        className = 'status status-updating';
+        text = message || 'yt-dlp...';
+        break;
+    }
+
+    statusEl.className = className;
+    statusEl.innerHTML = `
+      <div class="status-dot"></div>
+      ${text}
+    `;
   }
 }
 

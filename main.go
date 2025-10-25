@@ -22,7 +22,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lrstanley/go-ytdlp"
 	"github.com/sirupsen/logrus"
-	"github.com/u2takey/ffmpeg-go"
+	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 )
 
 //go:embed index.html
@@ -83,13 +83,13 @@ type Response struct {
 
 // WebSocket structures
 type WSMessage struct {
-	Type       string     `json:"type"`
-	DownloadID string     `json:"downloadId,omitempty"`
-	Line       string     `json:"line,omitempty"`
-	Percent    float64    `json:"percent,omitempty"`
-	File       string     `json:"file,omitempty"`
-	Message    string     `json:"message,omitempty"`
-	Videos     []string   `json:"videos,omitempty"`
+	Type       string      `json:"type"`
+	DownloadID string      `json:"downloadId,omitempty"`
+	Line       string      `json:"line,omitempty"`
+	Percent    float64     `json:"percent,omitempty"`
+	File       string      `json:"file,omitempty"`
+	Message    string      `json:"message,omitempty"`
+	Videos     []string    `json:"videos,omitempty"`
 	Queue      []JobStatus `json:"queue,omitempty"`
 }
 
@@ -118,8 +118,8 @@ type DownloadJob struct {
 // Job status for tracking download progress
 type JobStatus struct {
 	Job         *DownloadJob `json:"job"`
-	Status      string       `json:"status"`      // "queued", "processing", "completed", "error"
-	Progress    string       `json:"progress"`    // Current progress message
+	Status      string       `json:"status"`                // "queued", "processing", "completed", "error"
+	Progress    string       `json:"progress"`              // Current progress message
 	Error       string       `json:"error,omitempty"`       // Error message if any
 	CompletedAt *time.Time   `json:"completedAt,omitempty"` // Completion timestamp
 	StreamURL   string       `json:"streamUrl,omitempty"`   // Final stream URL
@@ -132,7 +132,7 @@ var (
 	jobStatusesMutex sync.RWMutex
 	wsClients        = make(map[*WSClient]bool)
 	wsClientsMutex   sync.RWMutex
-	upgrader = websocket.Upgrader{
+	upgrader         = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Allow all origins for development
 		},
@@ -272,7 +272,7 @@ func restoreVLCSession(config *VLCConfig) {
 	vlcSessionsMutex.Unlock()
 
 	logrus.WithField("vlc_url", config.URL).Info("VLC session restored from saved cookies")
-	
+
 	// Verify the session is still valid using /wsticket endpoint
 	go func() {
 		if err := verifyVLCSession(config.URL); err != nil {
@@ -635,47 +635,47 @@ func autoPlayVideo(filename string, vlcUrl string, backendUrl string) {
 	if strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
 		// Streaming file - use complex encoding
 		vlcType = "stream"
-		
+
 		// Split to encode only the filename
 		lastSlash := strings.LastIndex(videoPath, "/")
 		baseURL := videoPath[:lastSlash+1]
 		videoFilename := videoPath[lastSlash+1:]
-		
+
 		// Encode the filename (spaces become %20, etc.)
 		encodedFilename := url.PathEscape(videoFilename)
-		
+
 		// Reconstruct the path with encoded filename
 		fullPath := baseURL + encodedFilename
-		
+
 		// Manually encode for query parameter to preserve %20 as %2520
 		// Replace special characters but keep the % from %20 as %25
 		encodedPath := strings.ReplaceAll(fullPath, "%", "%25")
 		encodedPath = strings.ReplaceAll(encodedPath, ":", "%3A")
 		encodedPath = strings.ReplaceAll(encodedPath, "/", "%2F")
-		
+
 		// Construct the final URL
 		videoPath = encodedPath
 	} else {
 		// Direct file (MP4, etc.) - use same encoding as streaming files
 		vlcType = "stream" // VLC can handle direct URLs as stream
-		
+
 		// Split to encode only the filename
 		lastSlash := strings.LastIndex(videoPath, "/")
 		baseURL := videoPath[:lastSlash+1]
 		videoFilename := videoPath[lastSlash+1:]
-		
+
 		// Encode the filename (spaces become %20, etc.)
 		encodedFilename := url.PathEscape(videoFilename)
-		
+
 		// Reconstruct the path with encoded filename
 		fullPath := baseURL + encodedFilename
-		
+
 		// Manually encode for query parameter to preserve %20 as %2520
 		// Replace special characters but keep the % from %20 as %25
 		encodedPath := strings.ReplaceAll(fullPath, "%", "%25")
 		encodedPath = strings.ReplaceAll(encodedPath, ":", "%3A")
 		encodedPath = strings.ReplaceAll(encodedPath, "/", "%2F")
-		
+
 		// Construct the final URL
 		videoPath = encodedPath
 	}
@@ -1017,19 +1017,19 @@ func vlcVerifyHandler(w http.ResponseWriter, r *http.Request) {
 		vlcSessionsMutex.Lock()
 		session.Authenticated = true
 		session.LastActivity = time.Now()
-		
+
 		// Extract cookies from the HTTP client's cookie jar
 		if jar, ok := session.Client.Jar.(*cookiejar.Jar); ok {
 			parsedURL, _ := url.Parse(vlcUrl)
 			session.Cookies = jar.Cookies(parsedURL)
 		}
 		vlcSessionsMutex.Unlock()
-		
+
 		// Save cookies to file for persistence
 		if err := saveCookieToFile(vlcUrl, session); err != nil {
 			logrus.WithError(err).Warn("Failed to save VLC cookies to file")
 		}
-		
+
 		logrus.WithField("vlc_url", vlcUrl).Info("VLC VERIFY - Authentification réussie, session maintenue")
 		sendSuccess(w, "Authentification VLC réussie", "")
 	} else {
@@ -1145,8 +1145,8 @@ func broadcastQueueStatus() {
 	}
 
 	msg := WSMessage{
-		Type:   "queueStatus",
-		Queue:  statuses,
+		Type:  "queueStatus",
+		Queue: statuses,
 	}
 
 	logrus.WithField("queueSize", len(statuses)).Info("Broadcasting queue status to all clients")
@@ -1264,6 +1264,27 @@ func downloadWorker() {
 func processDownloadJob(job *DownloadJob) {
 	logrus.WithField("downloadId", job.ID).Info("Processing download job")
 
+	// Check and update yt-dlp before downloading
+	if err := checkAndUpdateYtDlp(context.Background()); err != nil {
+		logrus.WithError(err).Error("Failed to check/update yt-dlp")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    "Erreur lors de la vérification/mise à jour de yt-dlp",
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = "Erreur lors de la vérification/mise à jour de yt-dlp"
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		return
+	}
+
 	// Notify subscribers that download is starting
 	broadcastToSubscribers(job.ID, WSMessage{
 		Type:       "progress",
@@ -1274,11 +1295,11 @@ func processDownloadJob(job *DownloadJob) {
 	// Create yt-dlp command with progress callback using go-ytdlp library
 	// Use %(title)s.%(ext)s format to name files with video title
 	outputTemplate := filepath.Join(videoDir, "%(title)s.%(ext)s")
-	
+
 	// Track last broadcast time to throttle updates
 	var lastBroadcast time.Time
 	var lastPercent float64
-	
+
 	dl := ytdlp.New().
 		FormatSort("res,ext:mp4:m4a").
 		MergeOutputFormat("mp4").
@@ -1296,10 +1317,10 @@ func processDownloadJob(job *DownloadJob) {
 				"downloadedBytes": update.DownloadedBytes,
 				"totalBytes":      update.TotalBytes,
 			}).Info("ProgressFunc callback called")
-			
+
 			// Build detailed progress message
 			var progressMsg string
-			
+
 			switch update.Status {
 			case ytdlp.ProgressStatusDownloading:
 				// Show download progress with speed and ETA
@@ -1311,42 +1332,42 @@ func processDownloadJob(job *DownloadJob) {
 						speed = fmt.Sprintf(" @ %.2f MiB/s", bytesPerSec/1024/1024)
 					}
 				}
-				
+
 				eta := ""
 				if update.ETA() > 0 {
 					eta = fmt.Sprintf(" ETA %s", update.ETA().Round(time.Second))
 				}
-				
+
 				sizeInfo := ""
 				if update.TotalBytes > 0 {
-					sizeInfo = fmt.Sprintf(" (%.2f/%.2f MiB)", 
+					sizeInfo = fmt.Sprintf(" (%.2f/%.2f MiB)",
 						float64(update.DownloadedBytes)/1024/1024,
 						float64(update.TotalBytes)/1024/1024)
 				} else if update.DownloadedBytes > 0 {
 					sizeInfo = fmt.Sprintf(" (%.2f MiB)", float64(update.DownloadedBytes)/1024/1024)
 				}
-				
+
 				fragmentInfo := ""
 				if update.FragmentCount > 0 {
 					fragmentInfo = fmt.Sprintf(" [fragment %d/%d]", update.FragmentIndex, update.FragmentCount)
 				}
-				
-				progressMsg = fmt.Sprintf("Téléchargement: %s%s%s%s%s", 
+
+				progressMsg = fmt.Sprintf("Téléchargement: %s%s%s%s%s",
 					update.PercentString(), sizeInfo, speed, eta, fragmentInfo)
-					
+
 			case ytdlp.ProgressStatusFinished:
 				progressMsg = "Téléchargement terminé, post-traitement en cours..."
-				
+
 			case ytdlp.ProgressStatusError:
 				progressMsg = "Erreur lors du téléchargement"
-				
+
 			case ytdlp.ProgressStatusStarting:
 				progressMsg = "Démarrage du téléchargement..."
-				
+
 			default:
 				progressMsg = fmt.Sprintf("Status: %s @ %s", update.Status, update.PercentString())
 			}
-			
+
 			// Update job status progress (always update local state)
 			jobStatusesMutex.Lock()
 			if status, exists := jobStatuses[job.ID]; exists {
@@ -1357,23 +1378,23 @@ func processDownloadJob(job *DownloadJob) {
 				}
 			}
 			jobStatusesMutex.Unlock()
-			
+
 			// Throttle broadcasts: only broadcast if 1 second has passed OR percent changed by 1% OR status changed
 			currentPercent := update.Percent()
 			timeSinceLastBroadcast := time.Since(lastBroadcast)
 			percentDiff := currentPercent - lastPercent
-			
-			shouldBroadcast := timeSinceLastBroadcast >= 1*time.Second || 
-				percentDiff >= 1.0 || 
+
+			shouldBroadcast := timeSinceLastBroadcast >= 1*time.Second ||
+				percentDiff >= 1.0 ||
 				update.Status != ytdlp.ProgressStatusDownloading
-			
+
 			if shouldBroadcast {
 				logrus.WithFields(logrus.Fields{
 					"downloadId": job.ID,
 					"message":    progressMsg,
 					"percent":    currentPercent,
 				}).Info("Broadcasting progress update")
-				
+
 				broadcastToSubscribers(job.ID, WSMessage{
 					Type:       "progress",
 					DownloadID: job.ID,
@@ -1388,7 +1409,7 @@ func processDownloadJob(job *DownloadJob) {
 	// Execute download
 	logrus.Info("Starting yt-dlp download with progress tracking...")
 	result, err := dl.Run(context.TODO(), job.URL)
-	
+
 	// Log result details
 	if result != nil {
 		logrus.WithFields(logrus.Fields{
@@ -1397,7 +1418,7 @@ func processDownloadJob(job *DownloadJob) {
 			"stderrLen":  len(result.Stderr),
 			"outputLogs": len(result.OutputLogs),
 		}).Info("yt-dlp execution completed")
-		
+
 		// Log some output logs if available
 		if len(result.OutputLogs) > 0 {
 			logrus.WithField("logCount", len(result.OutputLogs)).Info("yt-dlp output logs available")
@@ -1411,7 +1432,7 @@ func processDownloadJob(job *DownloadJob) {
 			}
 		}
 	}
-	
+
 	if err != nil {
 		logrus.WithError(err).Error("yt-dlp download failed")
 		broadcastToSubscribers(job.ID, WSMessage{
@@ -1526,6 +1547,13 @@ func downloadTwitchHandler(w http.ResponseWriter, r *http.Request) {
 
 	logrus.WithField("url", req.URL).Info("Twitch - Extraction URL m3u8")
 
+	// Check and update yt-dlp before extracting URL
+	if err := checkAndUpdateYtDlp(context.Background()); err != nil {
+		logrus.WithError(err).Error("Failed to check/update yt-dlp")
+		sendError(w, "Erreur lors de la vérification/mise à jour de yt-dlp", http.StatusInternalServerError)
+		return
+	}
+
 	// Use yt-dlp to get the direct m3u8 URL using go-ytdlp library
 	dl := ytdlp.New().
 		GetURL().
@@ -1636,6 +1664,33 @@ func playDirectURL(videoURL string, vlcUrl string) {
 func processStreamJob(job *DownloadJob) {
 	logrus.WithField("downloadId", job.ID).Info("Processing stream job")
 
+	// Check and update yt-dlp before streaming
+	if err := checkAndUpdateYtDlp(context.Background()); err != nil {
+		logrus.WithError(err).Error("Failed to check/update yt-dlp")
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "error",
+			DownloadID: job.ID,
+			Message:    "Erreur lors de la vérification/mise à jour de yt-dlp",
+		})
+		// Update job status to error
+		jobStatusesMutex.Lock()
+		if status, exists := jobStatuses[job.ID]; exists {
+			status.Status = "error"
+			status.Error = "Erreur lors de la vérification/mise à jour de yt-dlp"
+			now := time.Now()
+			status.CompletedAt = &now
+		}
+		jobStatusesMutex.Unlock()
+		broadcastQueueStatus()
+		// Notify that this job is done (failed)
+		broadcastToSubscribers(job.ID, WSMessage{
+			Type:       "completed",
+			DownloadID: job.ID,
+			Message:    "Job terminé avec erreur",
+		})
+		return
+	}
+
 	// Notify subscribers that streaming is starting
 	broadcastToSubscribers(job.ID, WSMessage{
 		Type:       "queued",
@@ -1667,14 +1722,14 @@ func processStreamJob(job *DownloadJob) {
 		if err == nil {
 			break
 		}
-		
+
 		// Check if it's a "format not available" error
 		if strings.Contains(err.Error(), "Requested format is not available") {
 			logrus.WithFields(logrus.Fields{
 				"attempt": attempt,
 				"max":     maxRetries,
 			}).Warn("yt-dlp format not available, retrying...")
-			
+
 			if attempt < maxRetries {
 				time.Sleep(2 * time.Second) // Wait before retry
 				continue
@@ -1682,7 +1737,7 @@ func processStreamJob(job *DownloadJob) {
 		}
 		break
 	}
-	
+
 	if err != nil {
 		logrus.WithError(err).Error("yt-dlp video URL extraction failed")
 		broadcastToSubscribers(job.ID, WSMessage{
@@ -1810,10 +1865,10 @@ func processStreamJob(job *DownloadJob) {
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"title":    title,
+		"title":          title,
 		"sanitizedTitle": sanitizedTitle,
-		"videoURL": videoURL[:50] + "...",
-		"audioURL": audioURL[:50] + "...",
+		"videoURL":       videoURL[:50] + "...",
+		"audioURL":       audioURL[:50] + "...",
 	}).Info("Title and URLs extracted successfully")
 
 	// Create segments directory for this video
@@ -1856,7 +1911,7 @@ func processStreamJob(job *DownloadJob) {
 		DownloadID: job.ID,
 		Message:    "Conversion HLS en cours (peut prendre plusieurs minutes pour les longues vidéos)...",
 	})
-	
+
 	// Update job status with more detailed progress
 	jobStatusesMutex.Lock()
 	if status, exists := jobStatuses[job.ID]; exists {
@@ -1875,15 +1930,15 @@ func processStreamJob(job *DownloadJob) {
 	// Start ffmpeg asynchronously so it doesn't block
 	cmd := ffmpeg_go.Output([]*ffmpeg_go.Stream{videoStream, audioStream}, streamName,
 		ffmpeg_go.KwArgs{
-			"c:v":                   "copy",
-			"c:a":                   "copy",
-			"f":                     "hls",
-			"hls_time":              "6",
-			"hls_list_size":         "0",
-			"hls_segment_filename":  segmentPattern,
-			"hls_base_url":          fmt.Sprintf("segments/%s/", job.ID),
-			"start_number":          "0",
-			"hls_flags":             "independent_segments",
+			"c:v":                  "copy",
+			"c:a":                  "copy",
+			"f":                    "hls",
+			"hls_time":             "6",
+			"hls_list_size":        "0",
+			"hls_segment_filename": segmentPattern,
+			"hls_base_url":         fmt.Sprintf("segments/%s/", job.ID),
+			"start_number":         "0",
+			"hls_flags":            "independent_segments",
 		}).Compile()
 
 	// Start ffmpeg process
@@ -1912,7 +1967,7 @@ func processStreamJob(job *DownloadJob) {
 		})
 		return
 	}
-	
+
 	// Auto-play immediately after ffmpeg starts (for HLS streaming)
 	// The m3u8 file will be created within seconds and segments will be available
 	if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
@@ -1928,7 +1983,7 @@ func processStreamJob(job *DownloadJob) {
 	// Wait for ffmpeg to finish in a goroutine
 	go func(jobID string, streamName string, cmd *exec.Cmd) {
 		err := cmd.Wait()
-		
+
 		if err != nil {
 			logrus.WithError(err).WithField("downloadId", jobID).Error("ffmpeg HLS conversion failed")
 			broadcastToSubscribers(jobID, WSMessage{
@@ -1951,7 +2006,7 @@ func processStreamJob(job *DownloadJob) {
 				DownloadID: jobID,
 				Message:    "Job terminé avec erreur",
 			})
-			
+
 			// Remove from job statuses after delay
 			time.Sleep(30 * time.Second)
 			jobStatusesMutex.Lock()
@@ -1998,7 +2053,7 @@ func processStreamJob(job *DownloadJob) {
 			DownloadID: jobID,
 			Message:    "Job terminé avec succès",
 		})
-		
+
 		// Remove from job statuses after 30 seconds
 		time.Sleep(30 * time.Second)
 		jobStatusesMutex.Lock()
@@ -2010,36 +2065,84 @@ func processStreamJob(job *DownloadJob) {
 	// Continue to next job immediately - ffmpeg is running in background
 }
 
+// checkAndUpdateYtDlp checks if yt-dlp is up to date and updates it if necessary
+// It sends WebSocket notifications to inform the frontend about the update process
+func checkAndUpdateYtDlp(ctx context.Context) error {
+	logrus.Info("Checking yt-dlp version and updating if necessary...")
+
+	// Notify frontend that we're checking/updating yt-dlp
+	broadcastToAll(WSMessage{
+		Type:    "ytdlp_update",
+		Message: "Vérification de la version yt-dlp...",
+	})
+
+	// Create yt-dlp command for update
+	cmd := ytdlp.New()
+
+	// Run update - this will check for updates and update if needed
+	result, err := cmd.Update(ctx)
+	if err != nil {
+		logrus.WithError(err).Error("yt-dlp update failed")
+		broadcastToAll(WSMessage{
+			Type:    "ytdlp_update",
+			Message: fmt.Sprintf("Erreur lors de la mise à jour yt-dlp: %v", err),
+		})
+		return err
+	}
+
+	// Check the result to see if an update was performed
+	if result != nil && result.ExitCode == 0 {
+		stdout := strings.TrimSpace(result.Stdout)
+		if strings.Contains(stdout, "Updated yt-dlp to") || strings.Contains(stdout, "yt-dlp is up to date") {
+			if strings.Contains(stdout, "Updated yt-dlp to") {
+				logrus.Info("yt-dlp was updated successfully")
+				broadcastToAll(WSMessage{
+					Type:    "ytdlp_update",
+					Message: "yt-dlp mis à jour avec succès",
+				})
+			} else {
+				logrus.Info("yt-dlp is already up to date")
+				broadcastToAll(WSMessage{
+					Type:    "ytdlp_update",
+					Message: "yt-dlp est déjà à jour",
+				})
+			}
+		}
+	}
+
+	logrus.Info("yt-dlp update check completed")
+	return nil
+}
 
 // watchVideoDirectory periodically monitors the video directory for changes
 func watchVideoDirectory() {
 	logrus.Info("Video directory watcher started")
-	
+
 	var lastFiles []string
-	
+
 	for {
 		// Get current file list
 		currentFiles := getVideoList()
-		
+
 		// Check if the list has changed
 		if !slicesEqual(lastFiles, currentFiles) {
 			logrus.WithFields(logrus.Fields{
 				"previousCount": len(lastFiles),
 				"currentCount":  len(currentFiles),
 			}).Info("Video directory changed, broadcasting update")
-			
+
 			// Broadcast update to all clients
 			msg := WSMessage{
 				Type:   "list",
 				Videos: currentFiles,
 			}
 			broadcastToAll(msg)
-			
+
 			// Update last known state
 			lastFiles = make([]string, len(currentFiles))
 			copy(lastFiles, currentFiles)
 		}
-		
+
 		// Wait 2 seconds before checking again
 		time.Sleep(2 * time.Second)
 	}
