@@ -1,2 +1,44 @@
-videos
+# Ignore build artifacts
+server
+video-server
+main
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Videos directory (keep structure but not content)
+videos/*.m3u8
+videos/*.mp4
+videos/cookie/*
+!videos/cookie/.gitkeep
+videos/segments/*
+!videos/segments/.gitkeep
+
+# Logs
+*.log
+logs/
 video-server
