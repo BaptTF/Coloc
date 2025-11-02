@@ -213,12 +213,19 @@ func ListHandler(w http.ResponseWriter, r *http.Request) {
 	var filesWithTime []fileWithTime
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			// Filter for .mp4 and .m3u8 files only
+			filename := entry.Name()
+			if !strings.HasSuffix(strings.ToLower(filename), ".mp4") &&
+				!strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
+				continue
+			}
+
 			info, err := entry.Info()
 			if err != nil {
 				continue
 			}
 			filesWithTime = append(filesWithTime, fileWithTime{
-				name:    entry.Name(),
+				name:    filename,
 				modTime: info.ModTime(),
 			})
 		}

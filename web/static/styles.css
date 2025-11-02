@@ -33,6 +33,34 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
+/* ===== DARK THEME ===== */
+[data-theme="dark"] {
+  --primary-color: #f8fafc;
+  --primary-light: #e2e8f0;
+  --accent-color: #fb923c;
+  --accent-hover: #f97316;
+  --success-color: #34d399;
+  --danger-color: #f87171;
+  --warning-color: #fbbf24;
+  --info-color: #60a5fa;
+  --purple-color: #a78bfa;
+  
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  
+  --border-color: #334155;
+  --border-focus: #60a5fa;
+  
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.2);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+}
+
 /* ===== RESET & BASE ===== */
 * {
   box-sizing: border-box;
@@ -94,6 +122,17 @@ body {
   display: flex;
   gap: 1rem;
   align-items: center;
+}
+
+.theme-toggle {
+  padding: 0.5rem;
+  min-width: auto;
+  font-size: 1.125rem;
+}
+
+.theme-icon {
+  font-size: 1rem;
+  line-height: 1;
 }
 
 /* ===== CARDS & SECTIONS ===== */
@@ -171,6 +210,7 @@ label {
   font-size: 0.9rem;
   transition: all 0.2s ease;
   background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .input:focus {
@@ -235,7 +275,7 @@ label {
 
 .btn-primary {
   background: var(--primary-color);
-  color: white;
+  color: var(--bg-primary);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -245,7 +285,7 @@ label {
 
 .btn-accent {
   background: var(--accent-color);
-  color: white;
+  color: var(--bg-primary);
 }
 
 .btn-accent:hover:not(:disabled) {
@@ -255,7 +295,7 @@ label {
 
 .btn-success {
   background: var(--success-color);
-  color: white;
+  color: var(--bg-primary);
 }
 
 .btn-success:hover:not(:disabled) {
@@ -265,7 +305,7 @@ label {
 
 .btn-danger {
   background: var(--danger-color);
-  color: white;
+  color: var(--bg-primary);
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -275,7 +315,7 @@ label {
 
 .btn-purple {
   background: var(--purple-color);
-  color: white;
+  color: var(--bg-primary);
 }
 
 .btn-purple:hover:not(:disabled) {

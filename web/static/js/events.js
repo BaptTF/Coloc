@@ -4,6 +4,7 @@ import { VideoManager } from './video.js';
 import { VlcManager } from './vlc.js';
 import { DownloadManager } from './download.js';
 import { ModalManager } from './modal.js';
+import { themeManager } from './theme.js';
 
 // ===== EVENT HANDLERS =====
 function setupEventListeners() {
@@ -98,6 +99,12 @@ function setupEventListeners() {
         description.appendChild(clearBtn);
       }
     }
+  }
+
+  // Theme toggle button
+  const themeToggleBtn = document.getElementById('themeToggle');
+  if (themeToggleBtn) {
+    themeToggleBtn.onclick = () => themeManager.toggleTheme();
   }
 }
 
