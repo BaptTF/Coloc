@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -76,22 +77,25 @@ type WSClient struct {
 
 // DownloadJob represents a download task
 type DownloadJob struct {
-	ID             string    `json:"id"`
-	URL            string    `json:"url"`
-	OutputTemplate string    `json:"outputTemplate"`
-	AutoPlay       bool      `json:"autoPlay"`
-	VLCUrl         string    `json:"vlcUrl"`
-	BackendUrl     string    `json:"backendUrl"`
-	Mode           string    `json:"mode"` // "stream" or "download"
-	CreatedAt      time.Time `json:"createdAt"`
+	ID             string             `json:"id"`
+	URL            string             `json:"url"`
+	OutputTemplate string             `json:"outputTemplate"`
+	AutoPlay       bool               `json:"autoPlay"`
+	VLCUrl         string             `json:"vlcUrl"`
+	BackendUrl     string             `json:"backendUrl"`
+	Mode           string             `json:"mode"` // "stream" or "download"
+	CreatedAt      time.Time          `json:"createdAt"`
+	CancelContext  context.Context    `json:"-"`
+	CancelFunc     context.CancelFunc `json:"-"`
 }
 
 // JobStatus represents the status of a download job
 type JobStatus struct {
 	Job         *DownloadJob `json:"job"`
-	Status      string       `json:"status"`                // "queued", "processing", "completed", "error"
+	Status      string       `json:"status"`                // "queued", "processing", "completed", "error", "cancelled"
 	Progress    string       `json:"progress"`              // Current progress message
 	Error       string       `json:"error,omitempty"`       // Error message if any
 	CompletedAt *time.Time   `json:"completedAt,omitempty"` // Completion timestamp
 	StreamURL   string       `json:"streamUrl,omitempty"`   // Final stream URL
+	Cancelled   bool         `json:"cancelled"`             // Whether the job was cancelled
 }

@@ -61,7 +61,7 @@ class DownloadManager {
 
       // Remove jobs that are no longer in the queue (finished/removed)
       for (const [jobId, download] of state.downloads.entries()) {
-        if (!currentJobIds.has(jobId) && (download.status === 'completed' || download.status === 'error')) {
+        if (!currentJobIds.has(jobId) && (download.status === 'completed' || download.status === 'error' || download.status === 'cancelled')) {
           // Job finished and is no longer in queue - remove from display after a delay
           setTimeout(() => {
             const downloadEl = document.getElementById(`download-${jobId}`);
@@ -72,7 +72,7 @@ class DownloadManager {
             if (state.downloads.size === 0) {
               DownloadManager.hideProgressSection();
             }
-          }, 3000); // Keep completed/error jobs visible for 3 seconds
+          }, 3000); // Keep completed/error/cancelled jobs visible for 3 seconds
         }
       }
 
@@ -90,11 +90,13 @@ class DownloadManager {
           status: jobStatus.status || 'queued',
           progress: jobStatus.progress || 'Traitement en cours',
           percent: jobStatus.status === 'completed' ? 100 :
-                  jobStatus.status === 'error' ? 0 : 0, // Don't show fake progress
+                  jobStatus.status === 'error' ? 0 : 
+                  jobStatus.status === 'cancelled' ? 0 : 0, // Don't show fake progress
           error: jobStatus.error,
           streamUrl: jobStatus.streamUrl,
           completedAt: jobStatus.completedAt ? new Date(jobStatus.completedAt) : null,
-          createdAt: jobStatus.job.createdAt ? new Date(jobStatus.job.createdAt) : new Date()
+          createdAt: jobStatus.job.createdAt ? new Date(jobStatus.job.createdAt) : new Date(),
+          cancelled: jobStatus.cancelled || false
         };
 
         state.downloads.set(jobStatus.job.id, download);
@@ -123,6 +125,11 @@ class DownloadManager {
 
     // Update classes based on status
     downloadEl.className = `download-item ${download.status}`;
+    
+    // Add cancelled class for styling
+    if (download.cancelled || download.status === 'cancelled') {
+      downloadEl.classList.add('cancelled');
+    }
 
     // Use progress message instead of old message field
     const displayMessage = download.progress || download.message || 'Traitement en cours';
@@ -177,6 +184,14 @@ class DownloadManager {
           </button>
         </div>
       ` : ''}
+      
+      ${(download.status === 'queued' || download.status === 'processing' || download.status === 'downloading') ? `
+        <div class="download-actions">
+          <button class="btn btn-danger btn-sm" onclick="DownloadManager.cancelDownload('${download.id}')">
+            ❌ Annuler
+          </button>
+        </div>
+      ` : ''}
     `;
   }
 
@@ -186,7 +201,8 @@ class DownloadManager {
       processing: 'Traitement',
       downloading: 'Téléchargement',
       completed: 'Terminé',
-      error: 'Erreur'
+      error: 'Erreur',
+      cancelled: 'Annulé'
     };
     return statusTexts[status] || status;
   }
@@ -233,6 +249,38 @@ class DownloadManager {
       DownloadManager.updateDownload(downloadId, {
         status: 'error',
         message: error.message
+      });
+    }
+  }
+
+  static async cancelDownload(downloadId) {
+    try {
+      console.log('Cancelling download:', downloadId);
+      
+      // Update UI to show cancelling status
+      DownloadManager.updateDownload(downloadId, {
+        status: 'cancelled',
+        progress: 'Annulation en cours...'
+      });
+
+      // Call backend cancel endpoint
+      const response = await ApiClient.post(`/cancel/${downloadId}`, {});
+
+      if (response.success) {
+        toast.show('Téléchargement annulé', 'success');
+        // The backend will broadcast the updated queue status
+      } else {
+        toast.show(`Erreur: ${response.message}`, 'error');
+        // If backend fails, we might need to revert the UI change
+        // but for now, let the backend broadcast handle it
+      }
+    } catch (error) {
+      console.error('Error cancelling download:', error);
+      toast.show(`Erreur lors de l'annulation: ${error.message}`, 'error');
+      // Revert UI change on error
+      DownloadManager.updateDownload(downloadId, {
+        status: 'queued',
+        progress: 'Erreur lors de l\'annulation'
       });
     }
   }

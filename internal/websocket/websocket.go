@@ -40,7 +40,7 @@ func WSHandler(w http.ResponseWriter, r *http.Request) {
 		Message: ytdlpMessage,
 	})
 	client.Mu.Unlock()
-	
+
 	logrus.WithFields(logrus.Fields{
 		"ytdlpStatus":  ytdlpStatus,
 		"ytdlpMessage": ytdlpMessage,
@@ -51,14 +51,14 @@ func WSHandler(w http.ResponseWriter, r *http.Request) {
 	for _, status := range config.GetJobStatuses() {
 		statuses = append(statuses, *status)
 	}
-	
+
 	client.Mu.Lock()
 	client.Conn.WriteJSON(types.WSMessage{
 		Type:  "queueStatus",
 		Queue: statuses,
 	})
 	client.Mu.Unlock()
-	
+
 	logrus.WithField("queueSize", len(statuses)).Info("Sent initial queue status to new WebSocket client")
 
 	// Handle client messages
@@ -79,8 +79,10 @@ func WSHandler(w http.ResponseWriter, r *http.Request) {
 			// Send current queue status
 			BroadcastQueueStatus()
 		case "cancelDownload":
-			// Cancel download logic would go here
-			logrus.WithField("downloadId", msg.DownloadID).Info("Download cancellation requested")
+			// Cancel download logic - forward to the cancel handler
+			logrus.WithField("downloadId", msg.DownloadID).Info("Download cancellation requested via WebSocket")
+			// This is handled via HTTP endpoint, so we just log it for now
+			// The actual cancellation happens through the HTTP endpoint
 		}
 	}
 

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 	"github.com/lrstanley/go-ytdlp"
 	"github.com/sirupsen/logrus"
+	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 	"video-server/internal/state"
 	"video-server/internal/types"
 	"video-server/internal/vlc"
@@ -96,6 +96,20 @@ func CheckAndUpdateYtDlp(ctx context.Context) error {
 
 // ProcessDownloadJob handles downloading videos as MP4 files
 func ProcessDownloadJob(job *types.DownloadJob, updateStatus func(string, string, string), cleanup func(string)) {
+	// Check if job was cancelled before starting
+	if job.CancelContext != nil {
+		select {
+		case <-job.CancelContext.Done():
+			logrus.WithField("downloadId", job.ID).Info("Job cancelled before processing")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		default:
+		}
+	}
 	logrus.WithField("downloadId", job.ID).Info("Processing download job")
 
 	// Check and update yt-dlp before downloading
@@ -161,93 +175,114 @@ func ProcessDownloadJob(job *types.DownloadJob, updateStatus func(string, string
 				"count":      progressCallCount,
 			}).Info("yt-dlp progress update")
 		}
-			// Build detailed progress message
-			var progressMsg string
+		// Build detailed progress message
+		var progressMsg string
 
-			switch update.Status {
-			case ytdlp.ProgressStatusDownloading:
-				// Show download progress with speed and ETA
-				speed := ""
-				if !update.Started.IsZero() && update.DownloadedBytes > 0 {
-					elapsed := time.Since(update.Started).Seconds()
-					if elapsed > 0 {
-						bytesPerSec := float64(update.DownloadedBytes) / elapsed
-						speed = fmt.Sprintf(" @ %.2f MiB/s", bytesPerSec/1024/1024)
-					}
+		switch update.Status {
+		case ytdlp.ProgressStatusDownloading:
+			// Show download progress with speed and ETA
+			speed := ""
+			if !update.Started.IsZero() && update.DownloadedBytes > 0 {
+				elapsed := time.Since(update.Started).Seconds()
+				if elapsed > 0 {
+					bytesPerSec := float64(update.DownloadedBytes) / elapsed
+					speed = fmt.Sprintf(" @ %.2f MiB/s", bytesPerSec/1024/1024)
 				}
-
-				eta := ""
-				if update.ETA() > 0 {
-					eta = fmt.Sprintf(" ETA %s", update.ETA().Round(time.Second))
-				}
-
-				sizeInfo := ""
-				if update.TotalBytes > 0 {
-					sizeInfo = fmt.Sprintf(" (%.2f/%.2f MiB)",
-						float64(update.DownloadedBytes)/1024/1024,
-						float64(update.TotalBytes)/1024/1024)
-				} else if update.DownloadedBytes > 0 {
-					sizeInfo = fmt.Sprintf(" (%.2f MiB)", float64(update.DownloadedBytes)/1024/1024)
-				}
-
-				fragmentInfo := ""
-				if update.FragmentCount > 0 {
-					fragmentInfo = fmt.Sprintf(" [fragment %d/%d]", update.FragmentIndex, update.FragmentCount)
-				}
-
-				progressMsg = fmt.Sprintf("Téléchargement: %s%s%s%s%s",
-					update.PercentString(), sizeInfo, speed, eta, fragmentInfo)
-
-			case ytdlp.ProgressStatusFinished:
-				progressMsg = "Téléchargement terminé, post-traitement en cours..."
-
-			case ytdlp.ProgressStatusError:
-				progressMsg = "Erreur lors du téléchargement"
-
-			case ytdlp.ProgressStatusStarting:
-				progressMsg = "Démarrage du téléchargement..."
-
-			default:
-				progressMsg = fmt.Sprintf("Status: %s @ %s", update.Status, update.PercentString())
 			}
 
-			// Update job status progress
+			eta := ""
+			if update.ETA() > 0 {
+				eta = fmt.Sprintf(" ETA %s", update.ETA().Round(time.Second))
+			}
+
+			sizeInfo := ""
+			if update.TotalBytes > 0 {
+				sizeInfo = fmt.Sprintf(" (%.2f/%.2f MiB)",
+					float64(update.DownloadedBytes)/1024/1024,
+					float64(update.TotalBytes)/1024/1024)
+			} else if update.DownloadedBytes > 0 {
+				sizeInfo = fmt.Sprintf(" (%.2f MiB)", float64(update.DownloadedBytes)/1024/1024)
+			}
+
+			fragmentInfo := ""
+			if update.FragmentCount > 0 {
+				fragmentInfo = fmt.Sprintf(" [fragment %d/%d]", update.FragmentIndex, update.FragmentCount)
+			}
+
+			progressMsg = fmt.Sprintf("Téléchargement: %s%s%s%s%s",
+				update.PercentString(), sizeInfo, speed, eta, fragmentInfo)
+
+		case ytdlp.ProgressStatusFinished:
+			progressMsg = "Téléchargement terminé, post-traitement en cours..."
+
+		case ytdlp.ProgressStatusError:
+			progressMsg = "Erreur lors du téléchargement"
+
+		case ytdlp.ProgressStatusStarting:
+			progressMsg = "Démarrage du téléchargement..."
+
+		default:
+			progressMsg = fmt.Sprintf("Status: %s @ %s", update.Status, update.PercentString())
+		}
+
+		// Update job status progress
+		updateStatus(job.ID, "downloading", progressMsg)
+		if update.Status == ytdlp.ProgressStatusDownloading {
 			updateStatus(job.ID, "downloading", progressMsg)
-			if update.Status == ytdlp.ProgressStatusDownloading {
-				updateStatus(job.ID, "downloading", progressMsg)
-			}
+		}
 
-			// Throttle broadcasts
-			currentPercent := update.Percent()
-			timeSinceLastBroadcast := time.Since(lastBroadcast)
-			percentDiff := currentPercent - lastPercent
+		// Throttle broadcasts
+		currentPercent := update.Percent()
+		timeSinceLastBroadcast := time.Since(lastBroadcast)
+		percentDiff := currentPercent - lastPercent
 
-			shouldBroadcast := timeSinceLastBroadcast >= 1*time.Second ||
-				percentDiff >= 1.0 ||
-				update.Status != ytdlp.ProgressStatusDownloading
+		shouldBroadcast := timeSinceLastBroadcast >= 1*time.Second ||
+			percentDiff >= 1.0 ||
+			update.Status != ytdlp.ProgressStatusDownloading
 
-			if shouldBroadcast {
-				websocket.BroadcastToSubscribers(job.ID, types.WSMessage{
-					Type:       "progress",
-					DownloadID: job.ID,
-					Message:    progressMsg,
-					Percent:    currentPercent,
-				})
-				lastBroadcast = time.Now()
-				lastPercent = currentPercent
-			}
-		})
+		if shouldBroadcast {
+			websocket.BroadcastToSubscribers(job.ID, types.WSMessage{
+				Type:       "progress",
+				DownloadID: job.ID,
+				Message:    progressMsg,
+				Percent:    currentPercent,
+			})
+			lastBroadcast = time.Now()
+			lastPercent = currentPercent
+		}
+	})
 
 	// Execute download
 	logrus.WithField("downloadId", job.ID).Info("Starting yt-dlp execution...")
-	
-	// Create context with timeout (30 minutes for large downloads)
+
+	// Create context with timeout (30 minutes for large downloads) and cancellation
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	
+
+	// If job has a cancel context, combine them
+	if job.CancelContext != nil {
+		ctx = job.CancelContext
+	}
+
 	_, err := dl.Run(ctx, job.URL)
 
 	if err != nil {
+		// Check if the error is due to cancellation
+		if job.CancelContext != nil && job.CancelContext.Err() == context.Canceled {
+			logrus.WithField("downloadId", job.ID).Info("Download cancelled by user")
+			websocket.BroadcastToSubscribers(job.ID, types.WSMessage{
+				Type:       "progress",
+				DownloadID: job.ID,
+				Message:    "Téléchargement annulé",
+			})
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		}
+
 		logrus.WithError(err).WithField("downloadId", job.ID).Error("yt-dlp download failed")
 		websocket.BroadcastToSubscribers(job.ID, types.WSMessage{
 			Type:       "error",
@@ -549,6 +584,20 @@ func verifyVideoAccessible(videoPath string, maxRetries int) bool {
 
 // ProcessStreamJob handles streaming jobs using ffmpeg to create HLS streams
 func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, string), cleanup func(string)) {
+	// Check if job was cancelled before starting
+	if job.CancelContext != nil {
+		select {
+		case <-job.CancelContext.Done():
+			logrus.WithField("downloadId", job.ID).Info("Stream job cancelled before processing")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		default:
+		}
+	}
 	logrus.WithField("downloadId", job.ID).Info("Processing stream job with ffmpeg")
 
 	// Check and update yt-dlp before streaming
@@ -595,7 +644,28 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 	var err error
 	maxRetries := 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		output, err = dl.Run(context.TODO(), job.URL)
+		// Check for cancellation before each attempt
+		if job.CancelContext != nil {
+			select {
+			case <-job.CancelContext.Done():
+				logrus.WithField("downloadId", job.ID).Info("Stream job cancelled during format extraction")
+				updateStatus(job.ID, "cancelled", "Annulé")
+				websocket.BroadcastQueueStatus()
+				if cleanup != nil {
+					cleanup(job.ID)
+				}
+				return
+			default:
+			}
+		}
+
+		// Use job's cancel context if available, otherwise context.TODO()
+		ctx := context.TODO()
+		if job.CancelContext != nil {
+			ctx = job.CancelContext
+		}
+
+		output, err = dl.Run(ctx, job.URL)
 		if err == nil {
 			break
 		}
@@ -678,6 +748,17 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 
 	outputAudio, err := dlAudio.Run(context.TODO(), job.URL)
 	if err != nil {
+		// Check if the error is due to cancellation
+		if job.CancelContext != nil && job.CancelContext.Err() == context.Canceled {
+			logrus.WithField("downloadId", job.ID).Info("Stream job cancelled during audio extraction")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		}
+
 		logrus.WithError(err).Error("yt-dlp audio URL extraction failed")
 		websocket.BroadcastToSubscribers(job.ID, types.WSMessage{
 			Type:       "error",
@@ -755,14 +836,14 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 	}
 
 	// Run ffmpeg conversion in a goroutine with progress monitoring
-	go func(jobID, videoURL, audioURL, streamName, segmentPattern string) {
+	go func(jobID, videoURL, audioURL, streamName, segmentPattern string, cancelCtx context.Context) {
 		// Create a pipe to capture ffmpeg stderr (progress output)
 		stderrPipe := &bytes.Buffer{}
 		stderrReader, stderrWriter := io.Pipe()
 
 		// Start goroutine to parse progress from stderr
 		progressDone := make(chan bool)
-		go parseFFmpegProgress(stderrReader, jobID, progressDone)
+		go parseFFmpegProgress(stderrReader, jobID, progressDone, cancelCtx)
 
 		// Build ffmpeg stream with ffmpeg-go
 		videoInput := ffmpeg_go.Input(videoURL)
@@ -792,6 +873,22 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 		<-progressDone // Wait for progress parser to finish
 
 		if err != nil {
+			// Check if the error is due to cancellation
+			if cancelCtx != nil && cancelCtx.Err() == context.Canceled {
+				logrus.WithField("downloadId", jobID).Info("FFmpeg conversion cancelled")
+				websocket.BroadcastToSubscribers(jobID, types.WSMessage{
+					Type:       "progress",
+					DownloadID: jobID,
+					Message:    "Conversion annulée",
+				})
+				updateStatus(jobID, "cancelled", "Annulé")
+				websocket.BroadcastQueueStatus()
+				if cleanup != nil {
+					cleanup(jobID)
+				}
+				return
+			}
+
 			logrus.WithError(err).WithField("downloadId", jobID).Error("ffmpeg HLS conversion failed")
 			websocket.BroadcastToSubscribers(jobID, types.WSMessage{
 				Type:       "error",
@@ -827,13 +924,13 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 		if cleanup != nil {
 			cleanup(jobID)
 		}
-	}(job.ID, videoURL, audioURL, streamName, segmentPattern)
+	}(job.ID, videoURL, audioURL, streamName, segmentPattern, job.CancelContext)
 
 	// Continue to next job immediately - ffmpeg is running in background
 }
 
 // parseFFmpegProgress parses ffmpeg stderr output for progress information
-func parseFFmpegProgress(reader io.Reader, jobID string, done chan bool) {
+func parseFFmpegProgress(reader io.Reader, jobID string, done chan bool, cancelCtx context.Context) {
 	defer func() { done <- true }()
 
 	scanner := bufio.NewScanner(reader)
@@ -841,48 +938,58 @@ func parseFFmpegProgress(reader io.Reader, jobID string, done chan bool) {
 	// Example: frame= 1234 fps= 30 q=-1.0 size=   12345kB time=00:01:23.45 bitrate=1234.5kbits/s speed=1.23x
 	timeRegex := regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2}\.\d{2})`)
 	speedRegex := regexp.MustCompile(`speed=\s*(\d+\.?\d*)x`)
-	
+
 	lastBroadcast := time.Now()
-	
+
 	for scanner.Scan() {
+		// Check for cancellation
+		if cancelCtx != nil {
+			select {
+			case <-cancelCtx.Done():
+				logrus.WithField("downloadId", jobID).Info("FFmpeg progress parsing cancelled")
+				return
+			default:
+			}
+		}
+
 		line := scanner.Text()
-		
+
 		// Only broadcast every 2 seconds to avoid overwhelming the clients
 		if time.Since(lastBroadcast) < 2*time.Second {
 			continue
 		}
-		
+
 		// Try to extract time and speed
 		var progressMsg string
-		
+
 		if timeMatch := timeRegex.FindStringSubmatch(line); len(timeMatch) > 0 {
 			hours := timeMatch[1]
 			minutes := timeMatch[2]
 			seconds := timeMatch[3]
 			progressMsg = fmt.Sprintf("Progression: %s:%s:%s", hours, minutes, seconds)
-			
+
 			// Add speed if available
 			if speedMatch := speedRegex.FindStringSubmatch(line); len(speedMatch) > 1 {
 				speed := speedMatch[1]
 				progressMsg += fmt.Sprintf(" (vitesse: %sx)", speed)
 			}
-			
+
 			// Broadcast progress update
 			websocket.BroadcastToSubscribers(jobID, types.WSMessage{
 				Type:       "progress",
 				DownloadID: jobID,
 				Message:    progressMsg,
 			})
-			
+
 			lastBroadcast = time.Now()
-			
+
 			logrus.WithFields(logrus.Fields{
 				"downloadId": jobID,
 				"progress":   progressMsg,
 			}).Debug("ffmpeg progress update")
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		logrus.WithError(err).Warn("Error reading ffmpeg progress")
 	}

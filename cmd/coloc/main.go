@@ -135,6 +135,9 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 	// Generate unique download ID
 	downloadID := download.GenerateDownloadID()
 
+	// Create cancel context for the job
+	cancelCtx, cancelFunc := context.WithCancel(context.Background())
+
 	// Create download job
 	job := &types.DownloadJob{
 		ID:             downloadID,
@@ -145,6 +148,8 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 		BackendUrl:     req.BackendUrl,
 		Mode:           req.Mode,
 		CreatedAt:      time.Now(),
+		CancelContext:  cancelCtx,
+		CancelFunc:     cancelFunc,
 	}
 
 	// Initialize job status
@@ -251,11 +256,14 @@ func main() {
 	http.HandleFunc("/vlc/play", handlers.VLCPlayHandler)
 	http.HandleFunc("/vlc/status", handlers.VLCStatusHandler)
 	http.HandleFunc("/vlc/config", handlers.VLCConfigHandler)
-	
+
 	// Retry endpoint (needs access to downloadJobs channel and broadcast function)
 	http.HandleFunc("/retry/", func(w http.ResponseWriter, r *http.Request) {
 		handlers.RetryDownloadHandler(w, r, downloadJobs, broadcastQueueStatus)
 	})
+
+	// Cancel endpoint
+	http.HandleFunc("/cancel/", handlers.CancelDownloadHandler)
 
 	// Legacy static assets (for backward compatibility)
 	http.HandleFunc("/styles.css", handlers.StylesHandler)
@@ -288,6 +296,13 @@ func downloadWorker() {
 			"mode":       job.Mode,
 			"jobNumber":  jobCount,
 		}).Info("Download worker received job")
+
+		// Check if job was cancelled before processing
+		statuses := config.GetJobStatuses()
+		if jobStatus, exists := statuses[job.ID]; exists && jobStatus.Cancelled {
+			logrus.WithField("downloadId", job.ID).Info("Job was cancelled, skipping processing")
+			continue
+		}
 
 		// Update job status to processing
 		updateJobStatus(job.ID, "processing", "Traitement en cours")
