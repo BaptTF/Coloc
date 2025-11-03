@@ -168,11 +168,11 @@ func TestWebSocketProgressUpdates(t *testing.T) {
 		t.Error("❌ No queue status received!")
 		return
 	}
-	
+
 	t.Log("✅ Queue status received successfully")
 	t.Log("✅ WebSocket communication working")
 	t.Log("✅ Download job added to queue")
-	
+
 	// Note: Progress updates come later during actual download processing
 	// This test verifies the WebSocket infrastructure works correctly
 	if len(progressUpdates) > 0 {

@@ -81,7 +81,7 @@ class StatusManager {
       statusText.textContent = text;
     }
     
-    state.vlcWebSocketConnected = connected;
+    state.vlcState.wsConnected = connected;
   }
 
   static updateVlcPlaybackStatus(status) {

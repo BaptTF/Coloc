@@ -169,6 +169,18 @@ class VideoManager {
       const card = VideoManager.createVideoCard(filename);
       grid.appendChild(card);
     });
+    
+    // Add event delegation to handle clicks on VLC buttons
+    grid.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (button && button.textContent.includes('Lancer sur VLC')) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        const filename = button.getAttribute('data-filename');
+        VlcManager.playVideo(filename);
+      }
+    });
   }
 
   static createVideoCard(filename) {
@@ -179,7 +191,7 @@ class VideoManager {
     const actions = createElement('div', 'video-actions');
     const playBtn = createElement('button', 'btn btn-accent btn-sm');
     playBtn.innerHTML = '▶ Lancer sur VLC';
-    playBtn.onclick = () => VlcManager.playVideo(filename);
+    playBtn.setAttribute('data-filename', filename);
 
     actions.appendChild(playBtn);
     card.append(title, actions);

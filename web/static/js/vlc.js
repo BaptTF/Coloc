@@ -5,6 +5,7 @@ import { toast } from './toast.js';
 import { ApiClient } from './api.js';
 import { ModalManager } from './modal.js';
 import { StatusManager } from './status.js';
+import { WebSocketManager } from './websocket.js';
 
 // ===== VLC FUNCTIONALITY =====
 class VlcManager {
@@ -195,7 +196,8 @@ class VlcManager {
       
       if (response.success) {
         toast.show('Connexion WebSocket VLC établie', 'success');
-        StatusManager.updateVlcWebSocketStatus(true);
+        // Don't set status to connected here - wait for actual WebSocket messages
+        StatusManager.updateVlcWebSocketStatus(false, 'En attente de messages...');
         VlcManager.startHeartbeat();
         VlcManager.reconnectAttempts = 0;
         return true;
@@ -220,6 +222,11 @@ class VlcManager {
       await ApiClient.post(`${CONFIG.endpoints.vlcWsDisconnect}?vlc=${encodeURIComponent(vlcUrl)}`, {});
       this.stopHeartbeat();
       StatusManager.updateVlcWebSocketStatus(false);
+      // Clear VLC message timeout
+      if (WebSocketManager.vlcMessageTimeout) {
+        clearTimeout(WebSocketManager.vlcMessageTimeout);
+        WebSocketManager.vlcMessageTimeout = null;
+      }
       toast.show('Connexion WebSocket VLC fermée', 'info');
     } catch (error) {
       console.error('WebSocket disconnect error:', error);
@@ -284,18 +291,9 @@ class VlcManager {
   }
 
   static startHeartbeat() {
-    VlcManager.stopHeartbeat(); // Clear any existing interval
-    VlcManager.heartbeatInterval = setInterval(async () => {
-      const status = await VlcManager.getWebSocketStatus();
-      if (status) {
-        StatusManager.updateVlcWebSocketStatus(status.connected);
-        if (!status.connected) {
-          console.warn('WebSocket connection lost, attempting to reconnect...');
-          VlcManager.stopHeartbeat();
-          await VlcManager.attemptReconnect();
-        }
-      }
-    }, 5000); // Check every 5 seconds for more responsive updates
+    // WebSocket status is now updated through real-time WebSocket messages
+    // No need for polling heartbeat anymore
+    console.log('VLC WebSocket heartbeat started - using real-time messages instead of polling');
   }
 
   static stopHeartbeat() {

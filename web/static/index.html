@@ -2,8 +2,24 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Téléchargeur de Vidéos - Coloc</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Download videos from YouTube, Twitch and direct URLs with VLC integration">
+  <meta name="theme-color" content="#f97316">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Coloc">
+  <meta name="application-name" content="Coloc">
+  <meta name="msapplication-TileColor" content="#f97316">
+  <meta name="msapplication-config" content="/static/browserconfig.xml">
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/static/manifest.json">
+  
+  <!-- Apple Touch Icons -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.svg">
+  <link rel="icon" type="image/svg+xml" sizes="32x32" href="/static/icons/favicon-32x32.svg">
+  <link rel="icon" type="image/svg+xml" sizes="16x16" href="/static/icons/favicon-16x16.svg">
+  <link rel="mask-icon" href="/static/icons/apple-touch-icon.svg" color="#f97316">
   
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,9 +27,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   
   <!-- Styles -->
-  <link rel="stylesheet" href="/static/styles.css" onload="document.body.classList.add('styles-loaded')">
-
-</head>
+  <link rel="stylesheet" href="/static/styles.css">
+  
+  </head>
 
 <body>
   <!-- Header -->
@@ -291,6 +307,54 @@
     </div>
   </div>
 
+  <!-- PWA Install Banner -->
+  <div id="pwaInstallBanner" class="pwa-install-banner" style="display: none;">
+    <div class="pwa-install-content">
+      <div class="pwa-install-icon">
+        <img src="/static/icons/icon-192x192.png" alt="Coloc Icon" width="48" height="48">
+      </div>
+      <div class="pwa-install-text">
+        <h3>Installer Coloc</h3>
+        <p>Installez l'application pour un accès rapide et hors ligne</p>
+      </div>
+      <div class="pwa-install-actions">
+        <button type="button" id="pwaInstallBtn" class="btn btn-primary btn-sm">
+          Installer
+        </button>
+        <button type="button" id="pwaDismissBtn" class="btn btn-ghost btn-sm">
+          ✕
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PWA Install Instructions (iOS) -->
+  <div id="pwaInstallInstructions" class="pwa-install-instructions" style="display: none;">
+    <div class="pwa-instructions-content">
+      <button type="button" id="closeInstructions" class="btn btn-ghost btn-sm close-instructions">
+        ✕
+      </button>
+      <div class="pwa-instructions-icon">
+        <img src="/static/icons/icon-192x192.png" alt="Coloc Icon" width="64" height="64">
+      </div>
+      <h3>Installer Coloc sur iOS</h3>
+      <ol class="pwa-instructions-steps">
+        <li>Tapez sur <strong>Partager</strong> <span class="share-icon">📤</span></li>
+        <li>Faites défiler vers le bas et tapez sur <strong>"Sur l'écran d'accueil"</strong> <span class="home-icon">🏠</span></li>
+        <li>Tapez sur <strong>"Ajouter"</strong> pour installer l'application</li>
+      </ol>
+      <div class="pwa-instructions-visual">
+        <div class="ios-share-demo">
+          <div class="demo-toolbar">...</div>
+          <div class="demo-share-sheet">
+            <div class="demo-share-icon">📤</div>
+            <div class="demo-share-item">Sur l'écran d'accueil 🏠</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script type="module" src="/static/js/config.js"></script>
   <script type="module" src="/static/js/state.js"></script>
@@ -304,7 +368,25 @@
   <script type="module" src="/static/js/modal.js"></script>
   <script type="module" src="/static/js/video.js"></script>
   <script type="module" src="/static/js/theme.js"></script>
+  <script type="module" src="/static/js/pwa.js"></script>
   <script type="module" src="/static/js/events.js"></script>
   <script type="module" src="/static/js/app.js"></script>
+  <script type="module" src="/static/js/mobile.js"></script>
+  <script type="module" src="/static/js/mobile-performance.js"></script>
+  
+  <!-- Initialize styles-loaded and PWA detection -->
+  <script>
+    // Add styles-loaded class now that body exists
+    document.body.classList.add('styles-loaded');
+    
+    // Detect if running as PWA
+    window.isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                   window.navigator.standalone === true;
+    
+    // Add PWA class to body for styling
+    if (window.isPWA) {
+      document.documentElement.classList.add('pwa');
+    }
+  </script>
 </body>
 </html>

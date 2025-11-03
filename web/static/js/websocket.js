@@ -7,6 +7,9 @@ import { StatusManager } from './status.js';
 
 // ===== WEBSOCKET MANAGEMENT =====
 class WebSocketManager {
+  static vlcMessageTimeout = null;
+  static lastVlcMessageTime = null;
+
   static connect() {
     if (state.websocket && state.websocket.readyState === WebSocket.OPEN) {
       return; // Already connected
@@ -77,6 +80,12 @@ class WebSocketManager {
     }
 
     console.log('WebSocket message received:', message);
+
+    // Check if this is a VLC-related message and update last message time
+    if (message.type && message.type.startsWith('vlc_')) {
+      WebSocketManager.lastVlcMessageTime = Date.now();
+      WebSocketManager.resetVlcMessageTimeout();
+    }
 
     switch (message.type) {
       case 'queued':
@@ -162,12 +171,16 @@ class WebSocketManager {
           state.vlcState.status = message.vlcStatus;
           state.vlcState.lastUpdate = new Date();
           state.vlcState.hasState = true;
+          // Update WebSocket connection status - receiving messages means connection is active
+          StatusManager.updateVlcWebSocketStatus(true);
         }
         break;
       case 'vlc_player_status':
         // Simple playing/paused status
         if (message.vlcStatus) {
           VlcManager.updatePlayerStatus(message.vlcStatus);
+          // Update WebSocket connection status - receiving messages means connection is active
+          StatusManager.updateVlcWebSocketStatus(true);
         }
         break;
       case 'vlc_play_queue':
@@ -186,6 +199,8 @@ class WebSocketManager {
           // Update global state
           state.vlcState.volume = message.vlcVolume;
           state.vlcState.lastUpdate = new Date();
+          // Update WebSocket connection status - receiving messages means connection is active
+          StatusManager.updateVlcWebSocketStatus(true);
         }
         break;
       case 'vlc_error':
@@ -198,14 +213,20 @@ class WebSocketManager {
         console.log('VLC Auth:', message.vlcAuth);
         if (message.vlcAuth && message.vlcAuth.status === 'ok') {
           StatusManager.updateVlcStatus('authenticated');
+          // Update WebSocket connection status - receiving auth messages means connection is active
+          StatusManager.updateVlcWebSocketStatus(true);
         } else if (message.vlcAuth && message.vlcAuth.status === 'forbidden') {
           // Only show forbidden as error if it's initial auth, not command response
           if (!message.vlcAuth.initialMessage || message.vlcAuth.initialMessage === 'null') {
             console.warn('VLC authentication forbidden');
             StatusManager.updateVlcStatus('connectable');
+            // Update WebSocket connection status - receiving auth messages means connection is active
+            StatusManager.updateVlcWebSocketStatus(true);
           } else {
             // Command forbidden - this is normal when no media is playing
             console.debug('VLC command forbidden (no media playing):', message.vlcAuth.initialMessage);
+            // Update WebSocket connection status - receiving messages means connection is active
+            StatusManager.updateVlcWebSocketStatus(true);
           }
         }
         break;
@@ -240,13 +261,30 @@ class WebSocketManager {
         // Legacy VLC status
         if (message.vlcStatus) {
           VlcManager.updateLegacyStatus(message.vlcStatus);
+          // Update WebSocket connection status - receiving messages means connection is active
+          StatusManager.updateVlcWebSocketStatus(true);
         }
         break;
       case 'vlc_unhandled_message':
         // Unhandled VLC message type (for debugging)
         console.warn('Unhandled VLC message:', message.message);
+        // Update WebSocket connection status - receiving any VLC message means connection is active
+        StatusManager.updateVlcWebSocketStatus(true);
         break;
     }
+  }
+
+  static resetVlcMessageTimeout() {
+    // Clear existing timeout
+    if (WebSocketManager.vlcMessageTimeout) {
+      clearTimeout(WebSocketManager.vlcMessageTimeout);
+    }
+
+    // Set new timeout to detect connection loss (30 seconds without messages)
+    WebSocketManager.vlcMessageTimeout = setTimeout(() => {
+      console.warn('No VLC WebSocket messages received for 30 seconds, connection may be lost');
+      StatusManager.updateVlcWebSocketStatus(false);
+    }, 30000);
   }
 
   static updateStatus(status) {

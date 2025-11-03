@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>PWA Debug</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <h1>PWA Debug Page</h1>
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        function log(message) {
+            console.log(message);
+            results.innerHTML += '<p>' + message + '</p>';
+        }
+        
+        // Check service worker support
+        if ('serviceWorker' in navigator) {
+            log('✅ Service Worker supported');
+            
+            navigator.serviceWorker.register('/static/sw.js')
+                .then(registration => {
+                    log('✅ Service Worker registered: ' + registration.scope);
+                    log('Active: ' + (registration.active ? 'yes' : 'no'));
+                    log('Installing: ' + (registration.installing ? 'yes' : 'no'));
+                    log('Waiting: ' + (registration.waiting ? 'yes' : 'no'));
+                })
+                .catch(error => {
+                    log('❌ Service Worker registration failed: ' + error);
+                });
+        } else {
+            log('❌ Service Worker not supported');
+        }
+        
+        // Check manifest
+        fetch('/static/manifest.json')
+            .then(response => {
+                if (response.ok) {
+                    log('✅ Manifest accessible');
+                    return response.json();
+                } else {
+                    log('❌ Manifest not accessible: ' + response.status);
+                }
+            })
+            .then(manifest => {
+                if (manifest) {
+                    log('✅ Manifest valid, name: ' + manifest.name);
+                    log('Icons: ' + manifest.icons.length);
+                }
+            })
+            .catch(error => {
+                log('❌ Manifest error: ' + error);
+            });
+        
+        // Check PWA criteria
+        log('HTTPS: ' + (location.protocol === 'https:' || location.hostname === 'localhost' ? '✅' : '❌'));
+        log('Service Worker: ' + ('serviceWorker' in navigator ? '✅' : '❌'));
+        log('Manifest: ' + (document.querySelector('link[rel="manifest"]') ? '✅' : '❌'));
+        
+        // Check install prompt
+        let deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            log('✅ Install prompt detected');
+        });
+        
+        window.addEventListener('appinstalled', () => {
+            log('✅ App installed');
+        });
+    </script>
+</body>
+</html>

@@ -10,8 +10,8 @@ import (
 
 // Constants
 const (
-	VideoDir = "/videos"
-	CookieDir = "/videos/cookie"
+	VideoDir   = "/videos"
+	CookieDir  = "/videos/cookie"
 	CookieFile = "/videos/cookie/cookie.json"
 )
 
@@ -23,9 +23,9 @@ var (
 	jobStatusesMutex sync.RWMutex
 
 	// WebSocket management
-	wsClients        = make(map[*types.WSClient]bool)
-	wsClientsMutex   sync.RWMutex
-	upgrader         = websocket.Upgrader{
+	wsClients      = make(map[*types.WSClient]bool)
+	wsClientsMutex sync.RWMutex
+	upgrader       = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Allow all origins for development
 		},

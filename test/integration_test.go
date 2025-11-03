@@ -119,9 +119,9 @@ func TestFrontendIntegration(t *testing.T) {
 		defer resp.Body.Close()
 
 		// 200, 403, or 404 are all acceptable (depends on directory listing settings)
-		if resp.StatusCode != http.StatusOK && 
-		   resp.StatusCode != http.StatusForbidden && 
-		   resp.StatusCode != http.StatusNotFound {
+		if resp.StatusCode != http.StatusOK &&
+			resp.StatusCode != http.StatusForbidden &&
+			resp.StatusCode != http.StatusNotFound {
 			t.Errorf("Unexpected status for videos endpoint: %d", resp.StatusCode)
 		}
 	})
@@ -135,7 +135,7 @@ func TestVLCAuthIntegration(t *testing.T) {
 
 	// This test requires a running VLC server
 	vlcURL := "http://192.168.4.29:8080" // Change to your VLC URL
-	
+
 	t.Run("GetVLCCode", func(t *testing.T) {
 		resp, err := http.Get(baseURL + "/vlc/code?vlc=" + vlcURL)
 		if err != nil {
@@ -145,8 +145,8 @@ func TestVLCAuthIntegration(t *testing.T) {
 		defer resp.Body.Close()
 
 		// If VLC is not available, skip the test
-		if resp.StatusCode == http.StatusInternalServerError || 
-		   resp.StatusCode == http.StatusBadGateway {
+		if resp.StatusCode == http.StatusInternalServerError ||
+			resp.StatusCode == http.StatusBadGateway {
 			t.Skip("VLC server not available for testing")
 			return
 		}

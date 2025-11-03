@@ -72,12 +72,12 @@ func RetryDownloadHandler(w http.ResponseWriter, r *http.Request, downloadJobs c
 	select {
 	case downloadJobs <- newJob:
 		logrus.WithField("jobID", jobID).Info("Job re-added to queue for retry")
-		
+
 		// Broadcast queue status update to all connected clients
 		if broadcastQueue != nil {
 			broadcastQueue()
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(types.Response{
 			Success: true,

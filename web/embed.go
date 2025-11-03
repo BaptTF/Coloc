@@ -6,6 +6,7 @@ import "embed"
 var Static embed.FS
 
 // Legacy exports for backward compatibility
+//
 //go:embed static/index.html
 var IndexHTML []byte
 

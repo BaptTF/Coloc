@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -184,6 +185,42 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// shareTargetHandler handles PWA Web Share Target requests
+func shareTargetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get shared URL from query parameters
+	sharedURL := r.URL.Query().Get("url")
+	sharedTitle := r.URL.Query().Get("title")
+	sharedText := r.URL.Query().Get("text")
+
+	if sharedURL == "" {
+		// No URL shared, redirect to home
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"url":   sharedURL,
+		"title": sharedTitle,
+		"text":  sharedText,
+	}).Info("PWA Share Target received")
+
+	// Redirect to home with shared URL as parameter
+	redirectURL := "/?url=" + url.QueryEscape(sharedURL)
+	if sharedTitle != "" {
+		redirectURL += "&title=" + url.QueryEscape(sharedTitle)
+	}
+	if sharedText != "" {
+		redirectURL += "&text=" + url.QueryEscape(sharedText)
+	}
+
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+}
+
 func main() {
 
 	// Configure logrus
@@ -259,6 +296,9 @@ func main() {
 
 	// Cancel endpoint
 	http.HandleFunc("/cancel/", handlers.CancelDownloadHandler)
+
+	// PWA Share Target endpoint
+	http.HandleFunc("/share-target", shareTargetHandler)
 
 	// Legacy static assets (for backward compatibility)
 	http.HandleFunc("/styles.css", handlers.StylesHandler)

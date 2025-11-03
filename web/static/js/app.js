@@ -6,6 +6,7 @@ import { VideoManager } from './video.js';
 import { ModalManager } from './modal.js';
 import { DownloadManager } from './download.js';
 import { StatusManager } from './status.js';
+import { PWAManager } from './pwa.js';
 
 // ===== INITIALIZATION =====
 async function initializeApp() {
@@ -20,15 +21,22 @@ async function initializeApp() {
   // Setup event listeners
   setupEventListeners();
 
+  // Initialize PWA features
+  if (window.pwaManager) {
+    console.log('[App] PWA Manager initialized');
+  }
+
   // Connect WebSocket
   WebSocketManager.connect();
 
-  // Load initial data including server state
-  await Promise.all([
-    loadServerState(),
-    VlcManager.loadConfig(),
-    VideoManager.listVideos()
-  ]);
+  // Load server state first to establish baseline
+  await loadServerState();
+  
+  // Then load VLC config (which may override server state if more recent)
+  await VlcManager.loadConfig();
+  
+  // Load videos list
+  await VideoManager.listVideos();
 
   // Fetch VLC state after initial load
   await VlcManager.fetchInitialState();
@@ -48,11 +56,22 @@ async function loadServerState() {
     }
     
     // Update VLC status from server
-    if (state.vlc && state.vlc.sessions && state.vlc.sessions.length > 0) {
-      const hasAuthenticatedSession = state.vlc.sessions.some(s => s.authenticated);
-      if (hasAuthenticatedSession) {
-        StatusManager.updateVlcStatus('authenticated');
+    if (state.vlc && state.vlc.sessions) {
+      if (state.vlc.sessions.length > 0) {
+        const hasAuthenticatedSession = state.vlc.sessions.some(s => s.authenticated);
+        if (hasAuthenticatedSession) {
+          StatusManager.updateVlcStatus('authenticated');
+        } else {
+          // Has sessions but none authenticated - can connect
+          StatusManager.updateVlcStatus('connectable');
+        }
+      } else {
+        // No VLC sessions at all
+        StatusManager.updateVlcStatus('disconnected');
       }
+    } else {
+      // No VLC data available
+      StatusManager.updateVlcStatus('disconnected');
     }
   } catch (error) {
     console.error('Failed to load server state:', error);
@@ -79,6 +98,8 @@ function injectAdditionalStyles() {
 
 // ===== APP STARTUP =====
 document.addEventListener('DOMContentLoaded', () => {
+  
+  
   // Wait for CSS to load before initializing
   function initializeWhenReady() {
     if (document.body.classList.contains('styles-loaded')) {
@@ -108,3 +129,4 @@ window.VideoManager = VideoManager;
 window.ModalManager = ModalManager;
 window.DownloadManager = DownloadManager;
 window.WebSocketManager = WebSocketManager;
+window.PWAManager = PWAManager;
