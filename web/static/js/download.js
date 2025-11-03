@@ -147,8 +147,8 @@ class DownloadManager {
       <div class="download-progress">
         ${showProgressBar ? `
           <div class="progress-bar">
-            <div class="progress-fill ${download.status === 'completed' ? 'completed' : download.status === 'downloading' ? 'active' : ''}"
-                 style="width: ${percent}%"></div>
+<div class="progress-fill ${download.status === 'completed' ? 'completed' : (download.status === 'downloading' || download.status === 'streaming') ? 'active' : ''}"
+                  style="width: ${percent}%"></div>
           </div>
         ` : ''}
         <div class="progress-text">

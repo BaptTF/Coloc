@@ -877,7 +877,17 @@ label {
   background: linear-gradient(to right, var(--bg-secondary) 0%, rgb(249 115 22 / 0.02) 100%);
 }
 
+.download-item.streaming {
+  border-left: 4px solid var(--accent-color);
+  background: linear-gradient(to right, var(--bg-secondary) 0%, rgb(249 115 22 / 0.02) 100%);
+}
+
 .download-status.processing {
+  background: rgb(249 115 22 / 0.1);
+  color: var(--accent-color);
+}
+
+.download-status.streaming {
   background: rgb(249 115 22 / 0.1);
   color: var(--accent-color);
 }
