@@ -875,6 +875,21 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 		"sanitizedTitle": sanitizedTitle,
 	}).Info("Title and URLs extracted successfully")
 
+	// Check for cancellation before creating segments directory
+	if job.CancelContext != nil {
+		select {
+		case <-job.CancelContext.Done():
+			logrus.WithField("downloadId", job.ID).Info("Stream job cancelled before segments directory creation")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		default:
+		}
+	}
+
 	// Create segments directory for this video
 	segmentSubDir := filepath.Join(config.VideoDir, "segments", job.ID)
 	if err := os.MkdirAll(segmentSubDir, 0755); err != nil {
@@ -897,6 +912,21 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 	streamName := filepath.Join(config.VideoDir, fmt.Sprintf("%s.m3u8", sanitizedTitle))
 	segmentPattern := filepath.Join(config.VideoDir, "segments", job.ID, "segment_%03d.ts")
 
+	// Check for cancellation before starting HLS conversion
+	if job.CancelContext != nil {
+		select {
+		case <-job.CancelContext.Done():
+			logrus.WithField("downloadId", job.ID).Info("Stream job cancelled before HLS conversion")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		default:
+		}
+	}
+
 	// Start HLS conversion with ffmpeg
 	websocket.BroadcastToSubscribers(job.ID, types.WSMessage{
 		Type:       "progress",
@@ -907,12 +937,42 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 	updateStatus(job.ID, "streaming", "Conversion HLS avec ffmpeg...")
 	websocket.BroadcastQueueStatus()
 
+	// Check for cancellation before starting auto-play setup
+	if job.CancelContext != nil {
+		select {
+		case <-job.CancelContext.Done():
+			logrus.WithField("downloadId", job.ID).Info("Stream job cancelled before ffmpeg start")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		default:
+		}
+	}
+
 	// Auto-play after HLS stream is ready (for HLS streaming)
 	if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
 		streamFilename := filepath.Base(streamName)
 		go func(streamFilename, vlcUrl, backendUrl string) {
 			waitForM3U8AndPlay(streamName, streamFilename, vlcUrl, backendUrl)
 		}(streamFilename, job.VLCUrl, job.BackendUrl)
+	}
+
+	// Final cancellation check before starting ffmpeg
+	if job.CancelContext != nil {
+		select {
+		case <-job.CancelContext.Done():
+			logrus.WithField("downloadId", job.ID).Info("Stream job cancelled immediately before ffmpeg")
+			updateStatus(job.ID, "cancelled", "Annulé")
+			websocket.BroadcastQueueStatus()
+			if cleanup != nil {
+				cleanup(job.ID)
+			}
+			return
+		default:
+		}
 	}
 
 	// Run ffmpeg conversion in a goroutine with progress monitoring

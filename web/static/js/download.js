@@ -185,7 +185,7 @@ class DownloadManager {
         </div>
       ` : ''}
       
-      ${(download.status === 'queued' || download.status === 'processing' || download.status === 'downloading') ? `
+      ${(download.status === 'queued' || download.status === 'processing' || download.status === 'downloading' || download.status === 'streaming') ? `
         <div class="download-actions">
           <button class="btn btn-danger btn-sm" onclick="DownloadManager.cancelDownload('${download.id}')">
             ❌ Annuler
@@ -200,6 +200,7 @@ class DownloadManager {
       queued: 'En file',
       processing: 'Traitement',
       downloading: 'Téléchargement',
+      streaming: 'Conversion HLS',
       completed: 'Terminé',
       error: 'Erreur',
       cancelled: 'Annulé'
