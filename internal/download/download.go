@@ -359,6 +359,75 @@ func ProcessDownloadJob(job *types.DownloadJob, updateStatus func(string, string
 	}
 }
 
+// waitForM3U8AndPlay waits for the .m3u8 file to exist and contain valid HLS content before playing
+func waitForM3U8AndPlay(streamPath, streamFilename, vlcUrl, backendUrl string) {
+	maxWaitTime := 60 * time.Second
+	checkInterval := 1 * time.Second
+	startTime := time.Now()
+
+	for time.Since(startTime) < maxWaitTime {
+		// Check if file exists
+		if _, err := os.Stat(streamPath); err != nil {
+			logrus.WithFields(logrus.Fields{
+				"stream_path": streamPath,
+				"elapsed":     time.Since(startTime).Seconds(),
+			}).Debug("AUTO-PLAY - Waiting for m3u8 file to be created")
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		// Check if file contains valid HLS content
+		if isValidM3U8(streamPath) {
+			logrus.WithFields(logrus.Fields{
+				"stream_path": streamPath,
+				"elapsed":     time.Since(startTime).Seconds(),
+			}).Info("AUTO-PLAY - m3u8 file is ready, attempting playback")
+			AutoPlayVideo(streamFilename, vlcUrl, backendUrl)
+			return
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"stream_path": streamPath,
+			"elapsed":     time.Since(startTime).Seconds(),
+		}).Debug("AUTO-PLAY - m3u8 file exists but not ready yet")
+		time.Sleep(checkInterval)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"stream_path": streamPath,
+		"elapsed":     time.Since(startTime).Seconds(),
+	}).Error("AUTO-PLAY - Timeout waiting for m3u8 file to be ready")
+}
+
+// isValidM3U8 checks if the m3u8 file contains valid HLS playlist content
+func isValidM3U8(filePath string) bool {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	hasSegments := false
+	hasExtM3U := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "#EXTM3U" {
+			hasExtM3U = true
+		}
+		if strings.HasPrefix(line, "#EXTINF:") || strings.HasSuffix(line, ".ts") {
+			hasSegments = true
+		}
+		// If we have both, it's a valid HLS playlist
+		if hasExtM3U && hasSegments {
+			return true
+		}
+	}
+
+	return hasExtM3U && hasSegments
+}
+
 // AutoPlayVideo launches a video automatically on VLC if an authenticated session exists
 func AutoPlayVideo(filename string, vlcUrl string, backendUrl string) {
 	if filename == "" || vlcUrl == "" {
@@ -384,7 +453,7 @@ func AutoPlayVideo(filename string, vlcUrl string, backendUrl string) {
 	videoPath := backendUrl + "/videos/" + cleanFilename
 
 	// Verify video is accessible via HTTP before contacting VLC
-	if !verifyVideoAccessible(videoPath, 60) {
+	if !verifyVideoAccessible(videoPath, 10) {
 		logrus.WithFields(logrus.Fields{
 			"filename":   filename,
 			"video_path": videoPath,
@@ -826,12 +895,11 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 	updateStatus(job.ID, "streaming", "Conversion HLS avec ffmpeg...")
 	websocket.BroadcastQueueStatus()
 
-	// Auto-play immediately after ffmpeg starts (for HLS streaming)
+	// Auto-play after HLS stream is ready (for HLS streaming)
 	if job.AutoPlay && job.VLCUrl != "" && job.BackendUrl != "" {
 		streamFilename := filepath.Base(streamName)
 		go func(streamFilename, vlcUrl, backendUrl string) {
-			time.Sleep(5 * time.Second) // Wait for m3u8 file to be created
-			AutoPlayVideo(streamFilename, vlcUrl, backendUrl)
+			waitForM3U8AndPlay(streamName, streamFilename, vlcUrl, backendUrl)
 		}(streamFilename, job.VLCUrl, job.BackendUrl)
 	}
 
@@ -852,7 +920,7 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 		videoStream := videoInput.Video()
 		audioStream := audioInput.Audio()
 
-		err := ffmpeg_go.Output([]*ffmpeg_go.Stream{videoStream, audioStream}, streamName,
+		outputStream := ffmpeg_go.OutputContext(cancelCtx, []*ffmpeg_go.Stream{videoStream, audioStream}, streamName,
 			ffmpeg_go.KwArgs{
 				"c:v":                  "copy",
 				"c:a":                  "copy",
@@ -865,8 +933,9 @@ func ProcessStreamJob(job *types.DownloadJob, updateStatus func(string, string, 
 				"hls_flags":            "independent_segments",
 			}).
 			WithErrorOutput(io.MultiWriter(stderrPipe, stderrWriter)).
-			OverWriteOutput().
-			Run()
+			OverWriteOutput()
+
+		err := outputStream.Run(ffmpeg_go.SeparateProcessGroup())
 
 		// Close stderr writer to signal completion
 		stderrWriter.Close()
