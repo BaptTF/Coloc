@@ -225,8 +225,8 @@ body {
 }
 
 .logo-icon {
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   display: inline-block;
   vertical-align: middle;
 }
@@ -1560,8 +1560,8 @@ label {
   }
   
   .logo-icon {
-    width: 18px;
-    height: 18px;
+    width: 32px;
+    height: 32px;
   }
   
   .logo-text {
