@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"video-server/internal/download"
@@ -453,6 +454,13 @@ func getVideoList() []string {
 	var filesWithTime []fileWithTime
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			// Filter for .mp4 and .m3u8 files only
+			filename := entry.Name()
+			if !strings.HasSuffix(strings.ToLower(filename), ".mp4") &&
+				!strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
+				continue
+			}
+
 			info, err := entry.Info()
 			if err != nil {
 				continue

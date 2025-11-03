@@ -319,6 +319,12 @@ func ProcessDownloadJob(job *types.DownloadJob, updateStatus func(string, string
 		if entry.IsDir() {
 			continue
 		}
+		// Filter for .mp4 and .m3u8 files only
+		filename := entry.Name()
+		if !strings.HasSuffix(strings.ToLower(filename), ".mp4") &&
+			!strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
@@ -581,6 +587,12 @@ func PruneVideos() {
 	var files []fileInfo
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		// Filter for .mp4 and .m3u8 files only
+		filename := entry.Name()
+		if !strings.HasSuffix(strings.ToLower(filename), ".mp4") &&
+			!strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
 			continue
 		}
 		info, err := entry.Info()
