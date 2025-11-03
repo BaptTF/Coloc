@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"video-server/internal/state"
 	"video-server/internal/types"
 	"video-server/internal/vlc"
 	"video-server/internal/websocket"
@@ -323,7 +324,7 @@ func VLCStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	status := map[string]interface{}{
 		"authenticated": exists && session.Authenticated,
-		"url":          vlcURL,
+		"url":           vlcURL,
 	}
 
 	if exists {
@@ -333,6 +334,43 @@ func VLCStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+// VLCStateHandler returns current VLC playback state
+func VLCStateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vlcURL := r.URL.Query().Get("vlc")
+	if vlcURL == "" {
+		sendError(w, "URL VLC requise", http.StatusBadRequest)
+		return
+	}
+
+	// Get VLC state from global state
+	vlcStatus, vlcQueue, vlcVolume, lastUpdate := state.GetVLCState()
+
+	// Check if we have recent state (within last 30 seconds)
+	hasRecentState := !lastUpdate.IsZero() && time.Since(lastUpdate) < 30*time.Second
+
+	response := map[string]interface{}{
+		"vlc_url":     vlcURL,
+		"has_state":   hasRecentState,
+		"last_update": lastUpdate,
+		"vlc_status":  vlcStatus,
+		"vlc_queue":   vlcQueue,
+		"vlc_volume":  vlcVolume,
+	}
+
+	// Also include WebSocket connection status
+	clients := vlc.GetVLCWebSocketClients()
+	wsClient, wsExists := clients[vlcURL]
+	response["ws_connected"] = wsExists && wsClient.IsConnected()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // VLCConfigHandler manages VLC configuration
@@ -378,4 +416,167 @@ func VLCConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+}
+
+// VLCWebSocketConnectHandler establishes WebSocket connection to VLC
+func VLCWebSocketConnectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vlcURL := r.URL.Query().Get("vlc")
+	if vlcURL == "" {
+		sendError(w, "URL VLC requise", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithField("vlc_url", vlcURL).Info("VLC WS CONNECT - Demande de connexion WebSocket")
+
+	// Récupérer la session VLC stockée
+	sessions := vlc.GetVLCSessions()
+	session, exists := sessions[vlcURL]
+
+	// Require proper authentication before WebSocket connection
+	if !exists || !session.Authenticated {
+		logrus.WithField("vlc_url", vlcURL).Warn("VLC WS CONNECT - Session non authentifiée")
+		sendError(w, "VLC non authentifié. Veuillez vous connecter d'abord avec le bouton 'Se connecter'", http.StatusUnauthorized)
+		return
+	}
+
+	// Obtenir ou créer le client WebSocket
+	wsClient := vlc.GetVLCWebSocketClient(vlcURL, session)
+
+	// Tenter de se connecter
+	if err := wsClient.Connect(); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url": vlcURL,
+			"error":   err,
+		}).Error("VLC WS CONNECT - Échec de connexion WebSocket")
+		sendError(w, "Échec de connexion WebSocket VLC: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	logrus.WithField("vlc_url", vlcURL).Info("VLC WS CONNECT - Connexion WebSocket établie")
+	sendSuccess(w, "Connexion WebSocket VLC établie", "")
+}
+
+// VLCWebSocketStatusHandler returns VLC WebSocket connection status
+func VLCWebSocketStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vlcURL := r.URL.Query().Get("vlc")
+	if vlcURL == "" {
+		sendError(w, "URL VLC requise", http.StatusBadRequest)
+		return
+	}
+
+	clients := vlc.GetVLCWebSocketClients()
+	wsClient, exists := clients[vlcURL]
+
+	status := map[string]interface{}{
+		"connected":     exists && wsClient.IsConnected(),
+		"vlc_url":       vlcURL,
+		"authenticated": false,
+	}
+
+	// Vérifier aussi la session HTTP
+	sessions := vlc.GetVLCSessions()
+	if session, sessionExists := sessions[vlcURL]; sessionExists {
+		status["authenticated"] = session.Authenticated
+		status["last_activity"] = session.LastActivity
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// VLCWebSocketControlHandler sends control commands to VLC via WebSocket
+func VLCWebSocketControlHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vlcURL := r.URL.Query().Get("vlc")
+	if vlcURL == "" {
+		sendError(w, "URL VLC requise", http.StatusBadRequest)
+		return
+	}
+
+	// Parser la commande
+	var req struct {
+		Command     string   `json:"command"`
+		ID          *int     `json:"id,omitempty"`
+		FloatValue  *float64 `json:"floatValue,omitempty"`
+		LongValue   *int64   `json:"longValue,omitempty"`
+		StringValue *string  `json:"stringValue,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "JSON invalide", http.StatusBadRequest)
+		return
+	}
+
+	if req.Command == "" {
+		sendError(w, "Commande requise", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcURL,
+		"command": req.Command,
+	}).Info("VLC WS CONTROL - Envoi commande WebSocket")
+
+	// Obtenir le client WebSocket
+	clients := vlc.GetVLCWebSocketClients()
+	wsClient, exists := clients[vlcURL]
+
+	if !exists || !wsClient.IsConnected() {
+		logrus.WithField("vlc_url", vlcURL).Error("VLC WS CONTROL - Client WebSocket non connecté")
+		sendError(w, "Client WebSocket VLC non connecté", http.StatusBadGateway)
+		return
+	}
+
+	// Envoyer la commande
+	if err := wsClient.SendCommand(req.Command, req.ID, req.FloatValue, req.LongValue, req.StringValue); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"vlc_url": vlcURL,
+			"command": req.Command,
+			"error":   err,
+		}).Error("VLC WS CONTROL - Échec envoi commande")
+		sendError(w, "Échec envoi commande VLC: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"vlc_url": vlcURL,
+		"command": req.Command,
+	}).Info("VLC WS CONTROL - Commande envoyée avec succès")
+	sendSuccess(w, "Commande VLC envoyée avec succès", "")
+}
+
+// VLCWebSocketDisconnectHandler disconnects WebSocket connection to VLC
+func VLCWebSocketDisconnectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vlcURL := r.URL.Query().Get("vlc")
+	if vlcURL == "" {
+		sendError(w, "URL VLC requise", http.StatusBadRequest)
+		return
+	}
+
+	logrus.WithField("vlc_url", vlcURL).Info("VLC WS DISCONNECT - Demande de déconnexion WebSocket")
+
+	// Supprimer le client WebSocket
+	vlc.RemoveVLCWebSocketClient(vlcURL)
+
+	logrus.WithField("vlc_url", vlcURL).Info("VLC WS DISCONNECT - Déconnexion WebSocket effectuée")
+	sendSuccess(w, "Déconnexion WebSocket VLC effectuée", "")
 }

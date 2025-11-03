@@ -43,12 +43,12 @@ func CancelDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only allow cancellation for queued or processing jobs
-	if jobStatus.Status != "queued" && jobStatus.Status != "processing" {
+	// Only allow cancellation for queued, processing, or streaming jobs
+	if jobStatus.Status != "queued" && jobStatus.Status != "processing" && jobStatus.Status != "streaming" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(types.Response{
 			Success: false,
-			Message: "Seuls les jobs en file ou en cours peuvent être annulés",
+			Message: "Seuls les jobs en file, en cours ou en streaming peuvent être annulés",
 		})
 		return
 	}

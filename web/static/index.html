@@ -90,6 +90,92 @@
       </div>
     </section>
 
+    <!-- VLC Remote Control Section -->
+    <section class="section" id="vlcRemoteSection" style="display: none;">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">
+            🎮 Télécommande VLC
+          </h2>
+          <p class="card-description">
+            Contrôlez la lecture VLC en temps réel via WebSocket
+          </p>
+        </div>
+        
+        <div class="vlc-controls">
+          <!-- Connection Status -->
+          <div class="status-group">
+            <div class="status-indicator">
+              <span class="status-dot" id="vlcWsStatusDot"></span>
+              <span id="vlcWsStatusText">Vérification connexion VLC...</span>
+            </div>
+            <div class="connection-info">
+              <small>Connexion WebSocket VLC en temps réel</small>
+            </div>
+          </div>
+
+          <!-- Playback Controls -->
+          <div class="playback-controls">
+            <div class="control-row">
+              <button type="button" id="vlcPlay" class="btn btn-primary">
+                ▶️ Play
+              </button>
+              <button type="button" id="vlcPause" class="btn btn-warning">
+                ⏸️ Pause
+              </button>
+            </div>
+            
+            <div class="control-row">
+              <button type="button" id="vlcPrevious" class="btn btn-ghost">
+                ⏮️ Précédent
+              </button>
+              <button type="button" id="vlcNext" class="btn btn-ghost">
+                ⏭️ Suivant
+              </button>
+            </div>
+          </div>
+
+          <!-- Volume and Seek Controls -->
+          <div class="advanced-controls">
+            <div class="control-group">
+              <label for="volumeSlider">Volume</label>
+              <div class="volume-control">
+                <input type="range" id="volumeSlider" class="slider" min="0" max="100" value="50">
+                <span id="volumeValue">50%</span>
+              </div>
+            </div>
+            
+            <div class="control-group">
+              <label for="seekSlider">Position</label>
+              <div class="seek-control">
+                <input type="range" id="seekSlider" class="slider" min="0" max="100" value="0">
+                <span id="seekValue">0:00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Real-time Status -->
+          <div class="status-panel">
+            <h4>État actuel</h4>
+            <div class="status-info">
+              <div class="status-item">
+                <span class="label">Titre:</span>
+                <span id="currentTitle">-</span>
+              </div>
+              <div class="status-item">
+                <span class="label">Durée:</span>
+                <span id="currentDuration">-</span>
+              </div>
+              <div class="status-item">
+                <span class="label">État:</span>
+                <span id="playbackState">Arrêté</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Download Section -->
     <section class="section">
       <div class="card">

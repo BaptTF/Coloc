@@ -92,13 +92,31 @@ func WSHandler(w http.ResponseWriter, r *http.Request) {
 // BroadcastToAll sends a message to all WebSocket clients
 func BroadcastToAll(msg types.WSMessage) {
 	config.GetWSMutex().RLock()
+	clientCount := len(config.GetWSClients())
+	config.GetWSMutex().RUnlock()
+
+	logrus.WithFields(logrus.Fields{
+		"message_type": msg.Type,
+		"client_count": clientCount,
+	}).Info("Broadcasting message to WebSocket clients")
+
+	if clientCount == 0 {
+		logrus.Warn("No WebSocket clients connected to receive message")
+		return
+	}
+
+	config.GetWSMutex().RLock()
 	for client := range config.GetWSClients() {
 		go func(c *types.WSClient) {
 			c.Mu.Lock()
 			defer c.Mu.Unlock()
 			err := c.Conn.WriteJSON(msg)
 			if err != nil {
-				log.Printf("Failed to send WebSocket message: %v", err)
+				logrus.WithError(err).Error("Failed to send WebSocket message to client")
+			} else {
+				logrus.WithFields(logrus.Fields{
+					"message_type": msg.Type,
+				}).Debug("Successfully sent WebSocket message to client")
 			}
 		}(client)
 	}

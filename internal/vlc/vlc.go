@@ -214,3 +214,31 @@ func InitializeVLCSessions() {
 func SaveVLCSession(vlcURL string, session *types.VLCSession) error {
 	return saveCookieToFile(vlcURL, session)
 }
+
+// ConnectVLCWebSocket establishes WebSocket connection for authenticated VLC session
+func ConnectVLCWebSocket(vlcURL string, session *types.VLCSession) error {
+	if !session.Authenticated {
+		return fmt.Errorf("VLC session not authenticated")
+	}
+
+	wsClient := GetVLCWebSocketClient(vlcURL, session)
+	if err := wsClient.Connect(); err != nil {
+		return fmt.Errorf("failed to connect WebSocket: %w", err)
+	}
+
+	logrus.WithField("vlc_url", vlcURL).Info("VLC WebSocket connected successfully")
+	return nil
+}
+
+// DisconnectVLCWebSocket closes WebSocket connection for VLC
+func DisconnectVLCWebSocket(vlcURL string) {
+	RemoveVLCWebSocketClient(vlcURL)
+	logrus.WithField("vlc_url", vlcURL).Info("VLC WebSocket disconnected")
+}
+
+// IsVLCWebSocketConnected checks if VLC WebSocket is connected
+func IsVLCWebSocketConnected(vlcURL string) bool {
+	clients := GetVLCWebSocketClients()
+	wsClient, exists := clients[vlcURL]
+	return exists && wsClient.IsConnected()
+}

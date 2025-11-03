@@ -45,12 +45,11 @@ class WebSocketManager {
         state.wsConnected = false;
         WebSocketManager.updateStatus('disconnected');
 
-        // Attempt to reconnect
-        if (state.reconnectAttempts < state.maxReconnectAttempts) {
-          state.reconnectAttempts++;
-          console.log(`Reconnecting... (${state.reconnectAttempts}/${state.maxReconnectAttempts})`);
-          setTimeout(() => WebSocketManager.connect(), 2000 * state.reconnectAttempts);
-        }
+        // Always attempt to reconnect with exponential backoff
+        state.reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), 30000); // Max 30 seconds
+        console.log(`Reconnecting in ${delay/1000}s... (attempt ${state.reconnectAttempts})`);
+        setTimeout(() => WebSocketManager.connect(), delay);
       };
 
       state.websocket.onerror = (error) => {
@@ -155,6 +154,98 @@ class WebSocketManager {
         StatusManager.updateVlcStatus('authenticated');
         toast.show(message.message, 'success');
         break;
+      case 'vlc_now_playing':
+        // Comprehensive now playing information
+        if (message.vlcStatus) {
+          VlcManager.updateNowPlaying(message.vlcStatus);
+          // Update global state
+          state.vlcState.status = message.vlcStatus;
+          state.vlcState.lastUpdate = new Date();
+          state.vlcState.hasState = true;
+        }
+        break;
+      case 'vlc_player_status':
+        // Simple playing/paused status
+        if (message.vlcStatus) {
+          VlcManager.updatePlayerStatus(message.vlcStatus);
+        }
+        break;
+      case 'vlc_play_queue':
+        // Play queue update
+        if (message.vlcQueue) {
+          VlcManager.updatePlayQueue(message.vlcQueue);
+          // Update global state
+          state.vlcState.queue = message.vlcQueue;
+          state.vlcState.lastUpdate = new Date();
+        }
+        break;
+      case 'vlc_volume_update':
+        // Volume update
+        if (message.vlcVolume) {
+          VlcManager.updateVolume(message.vlcVolume.volume);
+          // Update global state
+          state.vlcState.volume = message.vlcVolume;
+          state.vlcState.lastUpdate = new Date();
+        }
+        break;
+      case 'vlc_error':
+        // VLC error
+        toast.show(message.message || 'VLC Error', 'error');
+        console.error('VLC Error:', message.vlcError);
+        break;
+      case 'vlc_auth':
+        // VLC authentication status
+        console.log('VLC Auth:', message.vlcAuth);
+        if (message.vlcAuth && message.vlcAuth.status === 'ok') {
+          StatusManager.updateVlcStatus('authenticated');
+        } else if (message.vlcAuth && message.vlcAuth.status === 'forbidden') {
+          // Only show forbidden as error if it's initial auth, not command response
+          if (!message.vlcAuth.initialMessage || message.vlcAuth.initialMessage === 'null') {
+            console.warn('VLC authentication forbidden');
+            StatusManager.updateVlcStatus('connectable');
+          } else {
+            // Command forbidden - this is normal when no media is playing
+            console.debug('VLC command forbidden (no media playing):', message.vlcAuth.initialMessage);
+          }
+        }
+        break;
+      case 'vlc_login_needed':
+        // VLC login required
+        StatusManager.updateVlcStatus('connectable');
+        toast.show('VLC login required', 'warning');
+        break;
+      case 'vlc_resume_confirmation':
+        // Resume playback confirmation
+        if (message.message) {
+          toast.show(message.message, 'info');
+        }
+        break;
+      case 'vlc_browser_description':
+        // Browser description
+        console.log('VLC Browser:', message.message);
+        break;
+      case 'vlc_playback_control_forbidden':
+        // Playback control forbidden
+        toast.show('Playback control forbidden', 'error');
+        break;
+      case 'vlc_ml_refresh_needed':
+        // Media library refresh needed
+        console.log('VLC ML refresh needed');
+        break;
+      case 'vlc_network_shares':
+        // Network shares discovered
+        console.log('VLC Network shares:', message.message);
+        break;
+      case 'vlc_status_legacy':
+        // Legacy VLC status
+        if (message.vlcStatus) {
+          VlcManager.updateLegacyStatus(message.vlcStatus);
+        }
+        break;
+      case 'vlc_unhandled_message':
+        // Unhandled VLC message type (for debugging)
+        console.warn('Unhandled VLC message:', message.message);
+        break;
     }
   }
 
@@ -168,10 +259,13 @@ class WebSocketManager {
   }
 
   static disconnect() {
+    // Note: We don't actually disconnect anymore - WebSocket should always stay connected
+    console.log('WebSocket disconnect requested, but keeping connection alive for auto-reconnection');
+    // Only clear the reference, don't actually close the connection
     if (state.websocket) {
-      state.websocket.close();
       state.websocket = null;
     }
+    state.wsConnected = false;
   }
 }
 

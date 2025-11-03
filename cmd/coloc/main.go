@@ -18,7 +18,6 @@ import (
 	"video-server/pkg/config"
 	"video-server/web"
 
-	"github.com/lrstanley/go-ytdlp"
 	"github.com/sirupsen/logrus"
 )
 
@@ -186,15 +185,6 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Check for install-only mode
-	if len(os.Args) > 1 && os.Args[1] == "install-tools" {
-		logrus.Info("Installing yt-dlp and ffmpeg...")
-		ytdlp.MustInstall(context.TODO(), nil)
-		ytdlp.MustInstallFFmpeg(context.TODO(), nil)
-		ytdlp.MustInstallFFprobe(context.TODO(), nil)
-		logrus.Info("Tools installed successfully")
-		return
-	}
 
 	// Configure logrus
 	logrus.SetFormatter(&logrus.JSONFormatter{})
@@ -208,9 +198,7 @@ func main() {
 		os.Setenv("PATH", ffmpegPath)
 	}
 
-	// Install yt-dlp and ffmpeg if needed (skip in Docker since already installed)
-	logrus.Info("Skipping yt-dlp installation (already available in Docker)")
-	// ytdlp.MustInstallAll(context.TODO())
+	// yt-dlp and ffmpeg are installed during Docker build
 	logrus.Info("yt-dlp and ffmpeg ready")
 
 	// Create videos directory
@@ -255,7 +243,14 @@ func main() {
 	http.HandleFunc("/vlc/verify-code", handlers.VLCVerifyHandler)
 	http.HandleFunc("/vlc/play", handlers.VLCPlayHandler)
 	http.HandleFunc("/vlc/status", handlers.VLCStatusHandler)
+	http.HandleFunc("/vlc/state", handlers.VLCStateHandler)
 	http.HandleFunc("/vlc/config", handlers.VLCConfigHandler)
+
+	// VLC WebSocket endpoints
+	http.HandleFunc("/vlc/ws/connect", handlers.VLCWebSocketConnectHandler)
+	http.HandleFunc("/vlc/ws/status", handlers.VLCWebSocketStatusHandler)
+	http.HandleFunc("/vlc/ws/control", handlers.VLCWebSocketControlHandler)
+	http.HandleFunc("/vlc/ws/disconnect", handlers.VLCWebSocketDisconnectHandler)
 
 	// Retry endpoint (needs access to downloadJobs channel and broadcast function)
 	http.HandleFunc("/retry/", func(w http.ResponseWriter, r *http.Request) {
@@ -271,8 +266,12 @@ func main() {
 	// Catch-all handler for the main page (must be last)
 	http.HandleFunc("/", handlers.HomeHandler)
 
-	logrus.Info("Server started on http://localhost:8080")
-	logrus.Fatal(http.ListenAndServe(":8080", nil))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	logrus.Infof("Server started on http://localhost:%s", port)
+	logrus.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 // downloadWorker processes the download queue

@@ -29,6 +29,9 @@ async function initializeApp() {
     VlcManager.loadConfig(),
     VideoManager.listVideos()
   ]);
+
+  // Fetch VLC state after initial load
+  await VlcManager.fetchInitialState();
 }
 
 // Load server state from backend

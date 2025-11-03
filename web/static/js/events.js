@@ -1,5 +1,6 @@
 import { CONFIG } from './config.js';
 import { elements, createElement } from './utils.js';
+import { state } from './state.js';
 import { VideoManager } from './video.js';
 import { VlcManager } from './vlc.js';
 import { DownloadManager } from './download.js';
@@ -45,6 +46,63 @@ function setupEventListeners() {
 
   if (loginVlcBtn) {
     loginVlcBtn.onclick = VlcManager.login;
+  }
+
+  // VLC WebSocket buttons (removed manual connect/disconnect - now automatic)
+  const vlcPlayBtn = document.getElementById('vlcPlay');
+  const vlcPauseBtn = document.getElementById('vlcPause');
+  const vlcPreviousBtn = document.getElementById('vlcPrevious');
+  const vlcNextBtn = document.getElementById('vlcNext');
+  const volumeSlider = document.getElementById('volumeSlider');
+  const seekSlider = document.getElementById('seekSlider');
+
+  if (vlcPlayBtn) {
+    vlcPlayBtn.onclick = () => VlcManager.play();
+  }
+
+  if (vlcPauseBtn) {
+    vlcPauseBtn.onclick = () => VlcManager.pause();
+  }
+
+  
+
+  if (vlcPreviousBtn) {
+    vlcPreviousBtn.onclick = () => VlcManager.previous();
+  }
+
+  if (vlcNextBtn) {
+    vlcNextBtn.onclick = () => VlcManager.next();
+  }
+
+  if (volumeSlider) {
+    volumeSlider.oninput = (e) => {
+      const volume = parseInt(e.target.value);
+      document.getElementById('volumeValue').textContent = volume + '%';
+    };
+    
+    volumeSlider.onchange = (e) => {
+      const volume = parseInt(e.target.value);
+      VlcManager.setVolume(volume);
+    };
+  }
+
+  if (seekSlider) {
+    seekSlider.oninput = (e) => {
+      const position = parseInt(e.target.value);
+      // Update seek display with current time based on position
+      const duration = state.vlcDuration || 0;
+      if (duration > 0) {
+        const currentTime = Math.floor((position / 100) * duration);
+        document.getElementById('seekValue').textContent = VlcManager.formatTime(currentTime);
+      } else {
+        document.getElementById('seekValue').textContent = position + '%';
+      }
+    };
+    
+    seekSlider.onchange = (e) => {
+      const position = parseInt(e.target.value);
+      VlcManager.seek(position);
+    };
   }
 
   // Modal buttons
