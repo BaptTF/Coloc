@@ -7,6 +7,7 @@ import { ModalManager } from './modal.js';
 import { DownloadManager } from './download.js';
 import { StatusManager } from './status.js';
 import { PWAManager } from './pwa.js';
+import { toast } from './toast.js';
 
 // ===== INITIALIZATION =====
 async function initializeApp() {
@@ -130,3 +131,4 @@ window.ModalManager = ModalManager;
 window.DownloadManager = DownloadManager;
 window.WebSocketManager = WebSocketManager;
 window.PWAManager = PWAManager;
+window.toastManager = toast;
