@@ -6,6 +6,7 @@ import { VlcManager } from './vlc.js';
 import { DownloadManager } from './download.js';
 import { ModalManager } from './modal.js';
 import { themeManager } from './theme.js';
+import { tabManager } from './tabs.js';
 
 // ===== EVENT HANDLERS =====
 function setupEventListeners() {
@@ -21,19 +22,35 @@ function setupEventListeners() {
   }
 
   if (youtubeStreamBtn) {
-    youtubeStreamBtn.onclick = () => VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
+    youtubeStreamBtn.onclick = async () => {
+      await VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
+      // Auto-switch to videos tab to show download progress
+      tabManager.switchToVideos();
+    };
   }
 
   if (youtubeDownloadBtn) {
-    youtubeDownloadBtn.onclick = () => VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'download');
+    youtubeDownloadBtn.onclick = async () => {
+      await VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'download');
+      // Auto-switch to videos tab to show download progress
+      tabManager.switchToVideos();
+    };
   }
 
   if (twitchBtn) {
-    twitchBtn.onclick = VideoManager.downloadTwitch;
+    twitchBtn.onclick = async () => {
+      await VideoManager.downloadTwitch();
+      // Auto-switch to videos tab to show download progress
+      tabManager.switchToVideos();
+    };
   }
 
   if (playDirectBtn) {
-    playDirectBtn.onclick = VideoManager.playDirectUrl;
+    playDirectBtn.onclick = async () => {
+      await VideoManager.playDirectUrl();
+      // Auto-switch to videos tab to see the video
+      tabManager.switchToVideos();
+    };
   }
 
   // VLC buttons
@@ -119,9 +136,11 @@ function setupEventListeners() {
 
   // Enter key for download
   if (elements.videoUrl) {
-    elements.videoUrl.addEventListener('keypress', (e) => {
+    elements.videoUrl.addEventListener('keypress', async (e) => {
       if (e.key === 'Enter') {
-        VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
+        await VideoManager.download(CONFIG.endpoints.youtube, 'youtube', 'stream');
+        // Auto-switch to videos tab to show download progress
+        tabManager.switchToVideos();
       }
     });
   }

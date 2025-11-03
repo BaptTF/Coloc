@@ -34,241 +34,254 @@
 <body>
   <!-- Header -->
   <header class="header">
-    <div class="container">
-      <div class="header-content">
-        <div class="logo">
-          <span class="logo-icon">📹</span>
-          <span>Téléchargeur de Vidéos</span>
+    <div class="header-content">
+      <div class="logo">
+        <img src="/static/icons/favicon-32x32.svg" alt="Coloc" class="logo-icon">
+        <span class="logo-text">Téléchargeur</span>
+      </div>
+      <div class="status-indicators">
+          <div id="vlcStatus" class="status-indicator status-disconnected" title="VLC">
+            <img src="/static/icons/vlc.png" alt="VLC" class="status-type-icon">
+            <span class="status-state">❌</span>
+          </div>
+          <div id="ytdlpStatus" class="status-indicator status-updating" title="yt-dlp">
+            <img src="/static/icons/yt-dlp.png" alt="yt-dlp" class="status-type-icon">
+            <span class="status-state">⏳</span>
+          </div>
+          <div class="ws-status status-indicator connecting" title="WebSocket">
+            <img src="/static/icons/websocket.png" alt="WebSocket" class="status-type-icon">
+            <span class="status-state">⏳</span>
+          </div>
         </div>
-        <div class="status-group">
-          <div id="vlcStatus" class="status status-disconnected">
-            <div class="status-dot"></div>
-            Déconnecté
-          </div>
-          <div id="ytdlpStatus" class="status status-updating">
-            <div class="status-dot"></div>
-            yt-dlp...
-          </div>
-          <div class="ws-status connecting">
-            <div class="status-dot"></div>
-            WebSocket...
-          </div>
+        <div class="header-actions">
           <button type="button" id="themeToggle" class="btn btn-ghost btn-sm theme-toggle" title="Basculer le thème">
             <span class="theme-icon">🌙</span>
           </button>
         </div>
-      </div>
     </div>
   </header>
 
-  <!-- Main Content -->
-  <main class="container">
-    <!-- Configuration Section -->
-    <section class="section">
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title">
-            ⚙️ Configuration
-          </h2>
-          <p class="card-description">
-            Configurez les URLs du backend et du serveur VLC
-          </p>
+  <!-- Tab Navigation -->
+  <div class="tabs-container">
+    <nav class="tab-nav">
+      <button type="button" class="tab-btn active" data-tab="config">
+        <span class="tab-icon">⚙️</span>
+        <span class="tab-label">Configuration</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="remote">
+        <span class="tab-icon">🎮</span>
+        <span class="tab-label">Remote</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="download">
+        <span class="tab-icon">📥</span>
+        <span class="tab-label">Download</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="videos">
+        <span class="tab-icon">📂</span>
+        <span class="tab-label">Videos</span>
+      </button>
+    </nav>
+
+    <!-- Tab Content -->
+    <main class="tab-content">
+      <!-- Configuration Tab -->
+      <div class="tab-panel active" id="config-panel">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">
+              ⚙️ Configuration
+            </h2>
+            <p class="card-description">
+              Configurez les URLs du backend et du serveur VLC
+            </p>
+          </div>
+          
+          <div class="form-columns">
+            <div class="form-group">
+              <label for="backendUrl">URL du backend</label>
+              <input type="text" id="backendUrl" class="input" placeholder="http://192.168.4.28:8080" aria-describedby="backend-help">
+              <small id="backend-help" class="sr-only">URL du serveur backend pour télécharger les vidéos</small>
+            </div>
+            
+            <div class="form-group">
+              <label for="vlcUrl">URL du serveur VLC</label>
+              <div class="form-row">
+                <input type="text" id="vlcUrl" class="input" value="http://192.168.4.168:8080" aria-describedby="vlc-help">
+                <button type="button" id="testVlc" class="btn btn-ghost btn-sm">
+                  Tester
+                </button>
+                <button type="button" id="loginVlc" class="btn btn-accent btn-sm">
+                  Se connecter
+                </button>
+              </div>
+              <small id="vlc-help" class="sr-only">URL du serveur VLC pour lire les vidéos</small>
+            </div>
+          </div>
+          
+          <div class="checkbox-group">
+            <input type="checkbox" id="autoPlay" class="checkbox" checked>
+            <label for="autoPlay" class="checkbox-label">
+              Lancer automatiquement après téléchargement
+            </label>
+          </div>
         </div>
-        
-        <div class="form-columns">
-          <div class="form-group">
-            <label for="backendUrl">URL du backend</label>
-            <input type="text" id="backendUrl" class="input" placeholder="http://192.168.4.28:8080" aria-describedby="backend-help">
-            <small id="backend-help" class="sr-only">URL du serveur backend pour télécharger les vidéos</small>
+      </div>
+
+      <!-- Remote Control Tab -->
+      <div class="tab-panel" id="remote-panel">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">
+              🎮 Télécommande VLC
+            </h2>
+            
+          </div>
+          
+          <div class="vlc-controls">
+            <!-- Connection Status -->
+            <div class="status-indicator">
+              <span class="status-dot" id="vlcWsStatusDot"></span>
+            </div>
+
+            <!-- Playback Controls -->
+            <div class="playback-controls">
+              <div class="control-row">
+                <button type="button" id="vlcPlay" class="btn btn-primary">
+                  ▶️ Play
+                </button>
+                <button type="button" id="vlcPause" class="btn btn-warning">
+                  ⏸️ Pause
+                </button>
+              </div>
+              
+              <div class="control-row">
+                <button type="button" id="vlcPrevious" class="btn btn-ghost">
+                  ⏮️ Précédent
+                </button>
+                <button type="button" id="vlcNext" class="btn btn-ghost">
+                  ⏭️ Suivant
+                </button>
+              </div>
+            </div>
+
+            <!-- Volume and Seek Controls -->
+            <div class="advanced-controls">
+              <div class="control-group">
+                <label for="volumeSlider">Volume</label>
+                <div class="volume-control">
+                  <input type="range" id="volumeSlider" class="slider" min="0" max="100" value="50">
+                  <span id="volumeValue">50%</span>
+                </div>
+              </div>
+              
+              <div class="control-group">
+                <label for="seekSlider">Position</label>
+                <div class="seek-control">
+                  <input type="range" id="seekSlider" class="slider" min="0" max="100" value="0">
+                  <span id="seekValue">0:00</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Real-time Status -->
+            <div class="status-panel">
+              <h4>État actuel</h4>
+              <div class="status-info">
+                <div class="status-item">
+                  <span class="label">Titre:</span>
+                  <span id="currentTitle">-</span>
+                </div>
+                <div class="status-item">
+                  <span class="label">Durée:</span>
+                  <span id="currentDuration">-</span>
+                </div>
+                <div class="status-item">
+                  <span class="label">État:</span>
+                  <span id="playbackState">Arrêté</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Download Tab -->
+      <div class="tab-panel" id="download-panel">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">
+              📥 Téléchargement
+            </h2>
+            <p class="card-description">
+              Entrez l'URL de la vidéo à télécharger ou lire
+            </p>
           </div>
           
           <div class="form-group">
-            <label for="vlcUrl">URL du serveur VLC</label>
-            <div class="form-row">
-              <input type="text" id="vlcUrl" class="input" value="http://192.168.4.168:8080" aria-describedby="vlc-help">
-              <button type="button" id="testVlc" class="btn btn-ghost btn-sm">
-                Tester
-              </button>
-              <button type="button" id="loginVlc" class="btn btn-accent btn-sm">
-                Se connecter
-              </button>
-            </div>
-            <small id="vlc-help" class="sr-only">URL du serveur VLC pour lire les vidéos</small>
+            <label for="videoUrl">URL de la vidéo</label>
+            <input 
+              type="url" 
+              id="videoUrl" 
+              class="input" 
+              placeholder="https://www.youtube.com/watch?v=... ou https://twitch.tv/..." 
+              aria-describedby="url-help"
+            >
+            <small id="url-help" class="sr-only">URL de la vidéo YouTube, Twitch, ou lien direct</small>
           </div>
-        </div>
-        
-        <div class="checkbox-group">
-          <input type="checkbox" id="autoPlay" class="checkbox" checked>
-          <label for="autoPlay" class="checkbox-label">
-            Lancer automatiquement après téléchargement
-          </label>
-        </div>
-      </div>
-    </section>
-
-    <!-- VLC Remote Control Section -->
-    <section class="section" id="vlcRemoteSection" style="display: none;">
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title">
-            🎮 Télécommande VLC
-          </h2>
-          <p class="card-description">
-            Contrôlez la lecture VLC en temps réel via WebSocket
-          </p>
-        </div>
-        
-        <div class="vlc-controls">
-          <!-- Connection Status -->
-          <div class="status-group">
-            <div class="status-indicator">
-              <span class="status-dot" id="vlcWsStatusDot"></span>
-              <span id="vlcWsStatusText">Vérification connexion VLC...</span>
-            </div>
-            <div class="connection-info">
-              <small>Connexion WebSocket VLC en temps réel</small>
-            </div>
-          </div>
-
-          <!-- Playback Controls -->
-          <div class="playback-controls">
-            <div class="control-row">
-              <button type="button" id="vlcPlay" class="btn btn-primary">
-                ▶️ Play
-              </button>
-              <button type="button" id="vlcPause" class="btn btn-warning">
-                ⏸️ Pause
-              </button>
-            </div>
-            
-            <div class="control-row">
-              <button type="button" id="vlcPrevious" class="btn btn-ghost">
-                ⏮️ Précédent
-              </button>
-              <button type="button" id="vlcNext" class="btn btn-ghost">
-                ⏭️ Suivant
-              </button>
-            </div>
-          </div>
-
-          <!-- Volume and Seek Controls -->
-          <div class="advanced-controls">
-            <div class="control-group">
-              <label for="volumeSlider">Volume</label>
-              <div class="volume-control">
-                <input type="range" id="volumeSlider" class="slider" min="0" max="100" value="50">
-                <span id="volumeValue">50%</span>
-              </div>
-            </div>
-            
-            <div class="control-group">
-              <label for="seekSlider">Position</label>
-              <div class="seek-control">
-                <input type="range" id="seekSlider" class="slider" min="0" max="100" value="0">
-                <span id="seekValue">0:00</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Real-time Status -->
-          <div class="status-panel">
-            <h4>État actuel</h4>
-            <div class="status-info">
-              <div class="status-item">
-                <span class="label">Titre:</span>
-                <span id="currentTitle">-</span>
-              </div>
-              <div class="status-item">
-                <span class="label">Durée:</span>
-                <span id="currentDuration">-</span>
-              </div>
-              <div class="status-item">
-                <span class="label">État:</span>
-                <span id="playbackState">Arrêté</span>
-              </div>
-            </div>
+          
+          <div class="btn-group">
+            <button type="button" id="downloadYoutubeStream" class="btn btn-danger">
+              📺 YouTube (Stream)
+            </button>
+            <button type="button" id="downloadYoutubeDownload" class="btn btn-danger">
+              📥 YouTube (Télécharger)
+            </button>
+            <button type="button" id="downloadTwitch" class="btn btn-purple">
+              🎮 Twitch
+            </button>
+            <button type="button" id="playDirect" class="btn btn-primary">
+              ▶ Lire URL directe
+            </button>
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- Download Section -->
-    <section class="section">
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title">
-            📥 Téléchargement
-          </h2>
-          <p class="card-description">
-            Entrez l'URL de la vidéo à télécharger ou lire
-          </p>
+      <!-- Videos Tab -->
+      <div class="tab-panel" id="videos-panel">
+        <!-- Download Progress Section -->
+        <div class="card" id="downloadProgressSection" style="display: none;">
+          <div class="card-header">
+            <h2 class="card-title">
+              ⏳ Téléchargements en cours
+            </h2>
+            <p class="card-description">
+              Suivez l'avancement de vos téléchargements en temps réel
+            </p>
+          </div>
+          
+          <div id="downloadsList" class="downloads-list">
+            <!-- Downloads will be added here dynamically -->
+          </div>
         </div>
-        
-        <div class="form-group">
-          <label for="videoUrl">URL de la vidéo</label>
-          <input 
-            type="url" 
-            id="videoUrl" 
-            class="input" 
-            placeholder="https://www.youtube.com/watch?v=... ou https://twitch.tv/..." 
-            aria-describedby="url-help"
-          >
-          <small id="url-help" class="sr-only">URL de la vidéo YouTube, Twitch, ou lien direct</small>
-        </div>
-        
-        <div class="btn-group">
-          <button type="button" id="downloadYoutubeStream" class="btn btn-danger">
-            📺 YouTube (Stream)
-          </button>
-          <button type="button" id="downloadYoutubeDownload" class="btn btn-danger">
-            📥 YouTube (Télécharger)
-          </button>
-          <button type="button" id="downloadTwitch" class="btn btn-purple">
-            🎮 Twitch
-          </button>
-          <button type="button" id="playDirect" class="btn btn-primary">
-            ▶ Lire URL directe
-          </button>
+
+        <!-- Available Videos Section -->
+        <div class="card videos-section">
+          <div class="videos-header">
+            <h2 class="card-title">
+              🎬 Vidéos disponibles
+            </h2>
+            <a href="/videos/" class="videos-link" target="_blank" rel="noopener">
+              📂 Accès direct aux fichiers
+            </a>
+          </div>
+          
+          <div id="videosGrid" class="video-grid">
+            <!-- Videos will be loaded here -->
+          </div>
         </div>
       </div>
-    </section>
-
-    <!-- Download Progress Section -->
-    <section class="section" id="downloadProgressSection" style="display: none;">
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title">
-            ⏳ Téléchargements en cours
-          </h2>
-          <p class="card-description">
-            Suivez l'avancement de vos téléchargements en temps réel
-          </p>
-        </div>
-        
-        <div id="downloadsList" class="downloads-list">
-          <!-- Downloads will be added here dynamically -->
-        </div>
-      </div>
-    </section>
-
-    <!-- Videos Section -->
-    <section class="section videos-section">
-      <div class="card">
-        <div class="videos-header">
-          <h2 class="card-title">
-            🎬 Vidéos disponibles
-          </h2>
-          <a href="/videos/" class="videos-link" target="_blank" rel="noopener">
-            📂 Accès direct aux fichiers
-          </a>
-        </div>
-        
-        <div id="videosGrid" class="video-grid">
-          <!-- Videos will be loaded here -->
-        </div>
-      </div>
-    </section>
-  </main>
+    </main>
+  </div>
 
   <!-- VLC Authentication Modal -->
   <div id="vlcModal" class="modal" role="dialog" aria-labelledby="modal-title" aria-hidden="true">
@@ -369,6 +382,7 @@
   <script type="module" src="/static/js/video.js"></script>
   <script type="module" src="/static/js/theme.js"></script>
   <script type="module" src="/static/js/pwa.js"></script>
+  <script type="module" src="/static/js/tabs.js"></script>
   <script type="module" src="/static/js/events.js"></script>
   <script type="module" src="/static/js/app.js"></script>
   <script type="module" src="/static/js/mobile.js"></script>

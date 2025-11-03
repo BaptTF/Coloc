@@ -3,6 +3,18 @@ import { state } from './state.js';
 
 // ===== STATUS MANAGEMENT =====
 class StatusManager {
+  // Status emoji mapping
+static statusEmojis = {
+    authenticated: '🔓',
+    connectable: '🔓',
+    updating: '⏳',
+    updated: '✅',
+    uptodate: '✅',
+    checking: '⏳',
+    error: '⚠️',
+    unknown: '❓'
+  };
+
   static updateVlcStatus(status) {
     const statusEl = elements.vlcStatus;
     if (!statusEl) return;
@@ -28,11 +40,33 @@ class StatusManager {
         break;
     }
 
-    statusEl.className = className;
-    statusEl.innerHTML = `
-      <div class="status-dot"></div>
-      ${text}
-    `;
+    statusEl.className = `status-indicator ${className.replace('status ', '')}`;
+    const isMobile = window.innerWidth <= 768;
+    const stateEmoji = StatusManager.statusEmojis[status] || '❓';
+    
+    if (isMobile) {
+      // Check if dual-indicator structure already exists
+      const typeEl = statusEl.querySelector('.status-type-icon');
+      const stateEl = statusEl.querySelector('.status-state');
+      
+      
+      
+      if (typeEl && stateEl) {
+        // Preserve existing structure, only update state emoji
+        stateEl.textContent = stateEmoji;
+      } else {
+        // Create dual-indicator structure if it doesn't exist
+        statusEl.innerHTML = `
+          <img src="/static/icons/vlc.png" alt="VLC" class="status-type-icon">
+          <span class="status-state">${stateEmoji}</span>
+        `;
+      }
+    } else {
+      statusEl.innerHTML = `
+        <div class="status-dot"></div>
+        ${text}
+      `;
+    }
 
     // Update login button text
     const loginBtn = document.getElementById('loginVlc');
@@ -54,6 +88,7 @@ class StatusManager {
   static updateWebSocketStatus(connected, text = '') {
     const statusDot = elements.wsStatusDot;
     const statusText = elements.wsStatusText;
+    const wsIndicator = document.querySelector('.ws-status');
     
     if (statusDot) {
       statusDot.className = 'status-dot ' + (connected ? 'connected' : '');
@@ -61,6 +96,31 @@ class StatusManager {
     
     if (statusText) {
       statusText.textContent = text || (connected ? 'Connecté' : 'Non connecté');
+    }
+    
+    // Update mobile emoji
+    if (wsIndicator) {
+      const isMobile = window.innerWidth <= 768;
+      const stateEmoji = connected ? '✅' : '❌';
+      
+if (isMobile) {
+      // Check if dual-indicator structure already exists
+      const typeEl = statusEl.querySelector('.status-type-icon');
+      const stateEl = statusEl.querySelector('.status-state');
+      
+      
+      
+      if (typeEl && stateEl) {
+        // Preserve existing structure, only update state emoji
+        stateEl.textContent = stateEmoji;
+      } else {
+          // Create dual-indicator structure if it doesn't exist
+          wsIndicator.innerHTML = `
+            <img src="/static/icons/websocket.png" alt="WebSocket" class="status-type-icon">
+            <span class="status-state">${stateEmoji}</span>
+          `;
+        }
+      }
     }
     
     state.wsConnected = connected;
@@ -164,11 +224,33 @@ class StatusManager {
         break;
     }
 
-    statusEl.className = className;
-    statusEl.innerHTML = `
-      <div class="status-dot"></div>
-      ${text}
-    `;
+    statusEl.className = `status-indicator ${className.replace('status ', '')}`;
+    const isMobile = window.innerWidth <= 768;
+    const stateEmoji = StatusManager.statusEmojis[status] || '❓';
+    
+    if (isMobile) {
+      // Check if dual-indicator structure already exists
+      const typeEl = statusEl.querySelector('.status-type-icon');
+      const stateEl = statusEl.querySelector('.status-state');
+      
+      
+      
+      if (typeEl && stateEl) {
+        // Preserve existing structure, only update state emoji
+        stateEl.textContent = stateEmoji;
+      } else {
+        // Create dual-indicator structure if it doesn't exist
+        statusEl.innerHTML = `
+          <img src="/static/icons/yt-dlp.png" alt="yt-dlp" class="status-type-icon">
+          <span class="status-state">${stateEmoji}</span>
+        `;
+      }
+    } else {
+      statusEl.innerHTML = `
+        <div class="status-dot"></div>
+        ${text}
+      `;
+    }
   }
 }
 

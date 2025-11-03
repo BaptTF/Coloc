@@ -26,15 +26,14 @@ export class MobileComponents {
   }
 
   setupMobileNavigation() {
-    // Only create mobile navigation on mobile devices and if header exists
+    // Mobile navigation is no longer needed since we have a compact header
+    // Only create on very small screens if needed in the future
     if (!this.isMobile || !document.querySelector('.header-content')) {
       return;
     }
     
-    // Create mobile navigation if it doesn't exist
-    if (!document.querySelector('.mobile-nav-toggle')) {
-      this.createMobileNavigation();
-    }
+    // Skip mobile navigation creation - our new header is mobile-friendly
+    return;
 
     const toggle = document.querySelector('.mobile-nav-toggle');
     const menu = document.querySelector('.mobile-menu');
@@ -79,7 +78,7 @@ export class MobileComponents {
     menu.innerHTML = `
       <div class="mobile-menu-header">
         <div class="logo">
-          <span class="logo-icon">📥</span>
+          <img src="/static/icons/favicon-32x32.svg" alt="Coloc" class="logo-icon">
           <span>Coloc</span>
         </div>
         <button class="mobile-menu-close" aria-label="Close menu">✕</button>
@@ -138,7 +137,8 @@ export class MobileComponents {
   }
 
   setupPullToRefresh() {
-    if (!this.isMobile) return;
+    // Disabled pull-to-refresh to prevent unwanted page refreshes
+    return;
 
     let startY = 0;
     let currentY = 0;
@@ -223,7 +223,7 @@ export class MobileComponents {
   }
 
   setupSwipeableCards() {
-    const cards = document.querySelectorAll('.download-item, .video-card');
+    const cards = document.querySelectorAll('.download-item');
     
     cards.forEach(card => {
       let startX = 0;

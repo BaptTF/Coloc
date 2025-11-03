@@ -291,8 +291,27 @@ class WebSocketManager {
     // Update WebSocket status in header if we add it
     const statusEl = document.querySelector('.ws-status');
     if (statusEl) {
-      statusEl.className = `ws-status ${status}`;
-      statusEl.textContent = status === 'connected' ? 'WebSocket connecté' : 'WebSocket déconnecté';
+      // Set proper status class like other indicators
+      statusEl.className = `ws-status status-indicator status-${status}`;
+      
+      // Check if mobile mode (has dual-indicator structure)
+      const isMobile = window.innerWidth <= 768;
+      const hasDualStructure = statusEl.querySelector('.status-type-icon') && statusEl.querySelector('.status-state');
+      
+      if (isMobile || hasDualStructure) {
+        // Mobile mode: update state emoji, preserve type emoji
+        const stateEl = statusEl.querySelector('.status-state');
+        if (stateEl) {
+          const stateEmoji = status === 'connected' ? '✅' : '❌';
+          stateEl.textContent = stateEmoji;
+        }
+      } else {
+        // Desktop mode: use text (backward compatibility)
+        statusEl.innerHTML = `
+          <div class="status-dot"></div>
+          ${status === 'connected' ? 'WebSocket connecté' : 'WebSocket déconnecté'}
+        `;
+      }
     }
   }
 

@@ -54,10 +54,9 @@ class PWAManager {
           });
         });
         
-        // Handle controller change
+        // Handle controller change - disabled auto refresh
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          console.log('[PWA] Service worker controller changed');
-          window.location.reload();
+          console.log('[PWA] Service worker controller changed - auto refresh disabled');
         });
         
       } catch (error) {
@@ -311,13 +310,13 @@ class PWAManager {
 
   analyzeURL(url) {
     if (url.includes('youtube.com') || url.includes('youtu.be')) {
-      return { platform: 'youtube', mode: 'download', icon: '📺' };
+      return { platform: 'youtube', mode: 'download', icon: '/static/icons/yt-dlp.png', iconAlt: 'yt-dlp' };
     } else if (url.includes('twitch.tv')) {
       return { platform: 'twitch', mode: 'stream', icon: '🎮' };
     } else if (url.match(/\.(mp4|avi|mkv|webm|mov)$/i)) {
       return { platform: 'direct', mode: 'play', icon: '🎬' };
     }
-    return { platform: 'unknown', mode: 'download', icon: '🔗' };
+    return { platform: 'unknown', mode: 'download', icon: '/static/icons/websocket.png', iconAlt: 'WebSocket' };
   }
 
   showSharedURLFeedback(url, title, text, analysis) {

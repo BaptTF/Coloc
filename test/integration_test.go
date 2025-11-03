@@ -78,7 +78,7 @@ func TestFrontendIntegration(t *testing.T) {
 	})
 
 	t.Run("JavaScriptFile", func(t *testing.T) {
-		resp, err := http.Get(baseURL + "/app.js")
+		resp, err := http.Get(baseURL + "/static/js/app.js")
 		if err != nil {
 			t.Fatalf("Failed to get JS: %v", err)
 		}
