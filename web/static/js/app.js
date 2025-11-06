@@ -74,6 +74,11 @@ async function loadServerState() {
       // No VLC data available
       StatusManager.updateVlcStatus('disconnected');
     }
+    
+    // Sync autoplay setting with server
+    if (state.autoPlay !== undefined && elements.autoPlay) {
+      elements.autoPlay.checked = state.autoPlay;
+    }
   } catch (error) {
     console.error('Failed to load server state:', error);
   }

@@ -4,6 +4,7 @@ import { toast } from './toast.js';
 import { DownloadManager } from './download.js';
 import { VideoManager } from './video.js';
 import { StatusManager } from './status.js';
+import { elements } from './utils.js';
 
 // ===== WEBSOCKET MANAGEMENT =====
 class WebSocketManager {
@@ -128,6 +129,13 @@ class WebSocketManager {
         console.log('Received queueStatus message:', message);
         console.log('Queue data:', message.queue);
         DownloadManager.updateQueueStatus(message.queue || []);
+        break;
+      case 'autoPlay':
+        // Live autoplay setting update
+        console.log('Received autoPlay message:', message.autoPlay);
+        if (elements.autoPlay && message.autoPlay !== undefined) {
+          elements.autoPlay.checked = message.autoPlay;
+        }
         break;
       case 'list':
         VideoManager.renderVideoGrid(message.videos);

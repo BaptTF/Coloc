@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,12 +9,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"video-server/internal/download"
 	"video-server/internal/handlers"
+	"video-server/internal/state"
 	"video-server/internal/types"
 	"video-server/internal/vlc"
 	"video-server/internal/websocket"
@@ -186,40 +189,176 @@ func downloadYouTubeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// extractURLFromText extracts URLs from text content using regex
+func extractURLFromText(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	// Handle direct URLs
+	trimmedText := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmedText, "http://") || strings.HasPrefix(trimmedText, "https://") {
+		return trimmedText
+	}
+
+	// Extract URLs from mixed content using regex
+	urlRegex := `https?://[^\s]+`
+	re := regexp.MustCompile(urlRegex)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 0 {
+		return strings.TrimSpace(matches[0])
+	}
+
+	return ""
+}
+
+// extractURL extracts URL from multiple sources with priority order
+func extractURL(sharedURL, sharedText, sharedTitle string) string {
+	// Priority 1: Direct URL field (works on desktop/iOS)
+	if sharedURL != "" {
+		return sharedURL
+	}
+
+	// Priority 2: Extract from text field (Android workaround)
+	if extractedURL := extractURLFromText(sharedText); extractedURL != "" {
+		return extractedURL
+	}
+
+	// Priority 3: Extract from title field (fallback)
+	if extractedURL := extractURLFromText(sharedTitle); extractedURL != "" {
+		return extractedURL
+	}
+
+	return ""
+}
+
 // shareTargetHandler handles PWA Web Share Target requests
 func shareTargetHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get shared URL from query parameters
-	sharedURL := r.URL.Query().Get("url")
-	sharedTitle := r.URL.Query().Get("title")
-	sharedText := r.URL.Query().Get("text")
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+		return
+	}
 
-	if sharedURL == "" {
-		// No URL shared, redirect to home
+	// Get shared data from form
+	sharedURL := r.FormValue("url")
+	sharedTitle := r.FormValue("title")
+	sharedText := r.FormValue("text")
+
+	// Extract URL using resilient logic
+	extractedURL := extractURL(sharedURL, sharedText, sharedTitle)
+
+	// Log all received content for debugging
+	logrus.WithFields(logrus.Fields{
+		"rawUrl":       sharedURL,
+		"rawTitle":     sharedTitle,
+		"rawText":      sharedText,
+		"extractedUrl": extractedURL,
+		"userAgent":    r.Header.Get("User-Agent"),
+	}).Info("Share target content analysis")
+
+	if extractedURL == "" {
+		logrus.WithFields(logrus.Fields{
+			"url":   sharedURL,
+			"title": sharedTitle,
+			"text":  sharedText,
+		}).Warn("No URL found in shared content")
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"url":   sharedURL,
-		"title": sharedTitle,
-		"text":  sharedText,
-	}).Info("PWA Share Target received")
+		"originalUrl":  sharedURL,
+		"extractedUrl": extractedURL,
+		"title":        sharedTitle,
+		"text":         sharedText,
+	}).Info("URL extracted from shared content - starting auto-download")
 
-	// Redirect to home with shared URL as parameter
-	redirectURL := "/?url=" + url.QueryEscape(sharedURL)
-	if sharedTitle != "" {
-		redirectURL += "&title=" + url.QueryEscape(sharedTitle)
-	}
-	if sharedText != "" {
-		redirectURL += "&text=" + url.QueryEscape(sharedText)
+	// Determine download type based on extracted URL
+	var downloadType string
+	var endpoint string
+	var mode string
+
+	if strings.Contains(extractedURL, "youtube.com") || strings.Contains(extractedURL, "youtu.be") {
+		downloadType = "youtube"
+		endpoint = "/urlyt"
+		mode = "stream" // Auto-choose stream for YouTube
+	} else if strings.Contains(extractedURL, "twitch.tv") {
+		downloadType = "twitch"
+		endpoint = "/twitch"
+		mode = ""
+	} else if strings.Contains(extractedURL, ".mp4") || strings.Contains(extractedURL, ".m3u8") ||
+		strings.Contains(extractedURL, ".avi") || strings.Contains(extractedURL, ".mkv") ||
+		strings.Contains(extractedURL, ".webm") || strings.Contains(extractedURL, ".mov") {
+		downloadType = "direct"
+		endpoint = "/url"
+		mode = ""
+	} else {
+		// Default to YouTube download for unknown URLs
+		downloadType = "youtube"
+		endpoint = "/urlyt"
+		mode = "stream"
 	}
 
-	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+	// Get autoplay setting from server state
+	autoPlay := state.GetAutoPlay()
+
+	// Create download request
+	var requestData map[string]interface{}
+	if downloadType == "youtube" {
+		requestData = map[string]interface{}{
+			"url":        extractedURL,
+			"autoPlay":   autoPlay,
+			"vlcUrl":     "",
+			"backendUrl": "",
+			"mode":       mode,
+		}
+	} else {
+		requestData = map[string]interface{}{
+			"url":        extractedURL,
+			"autoPlay":   autoPlay,
+			"vlcUrl":     "",
+			"backendUrl": "",
+		}
+	}
+
+	// Send download request to appropriate endpoint
+	client := &http.Client{Timeout: 30 * time.Second}
+	jsonData, _ := json.Marshal(requestData)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	resp, err := client.Post("http://localhost:"+port+endpoint, "application/json", bytes.NewBuffer(jsonData))
+
+	if err != nil {
+		logrus.WithError(err).Error("Failed to start auto-download")
+		// Redirect to home with extracted URL for manual download
+		redirectURL := "/?url=" + url.QueryEscape(extractedURL)
+		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		logrus.WithFields(logrus.Fields{
+			"url":      extractedURL,
+			"type":     downloadType,
+			"mode":     mode,
+			"endpoint": endpoint,
+		}).Info("Auto-download started successfully")
+	} else {
+		logrus.WithField("status", resp.StatusCode).Error("Auto-download failed")
+	}
+
+	// Redirect to home to show download progress
+	http.Redirect(w, r, "/?autoDownload=true&type="+downloadType, http.StatusTemporaryRedirect)
 }
 
 func main() {
@@ -269,6 +408,7 @@ func main() {
 
 	// API endpoints (must be before the catch-all "/" handler)
 	http.HandleFunc("/api/state", handlers.ServerStateHandler)
+	http.HandleFunc("/api/autoplay", handlers.AutoPlayHandler)
 	http.HandleFunc("/queue", queueStatusHandler)
 	http.HandleFunc("/queue/clear", clearQueueHandler)
 	http.HandleFunc("/url", handlers.DownloadURLHandler)

@@ -15,16 +15,33 @@ A Progressive Web App (PWA) is a web application that can be installed on your d
 
 ## 🚀 Installation Instructions
 
+### 📋 Prerequisites
+
+**Important:** PWA installation requires a trusted HTTPS certificate. Use Cloudflare Tunnel (recommended) or ngrok:
+
+```bash
+# Start your server
+docker compose up -d
+
+# Option 1: Cloudflare Tunnel (recommended - no registration)
+cloudflared tunnel --url http://localhost:8080
+
+# Option 2: ngrok (requires registration)
+ngrok http 8080
+
+# Use the provided HTTPS URL for installation
+```
+
 ### Android (Chrome/Edge/Firefox)
 
 #### Method 1: Install Banner (Easiest)
-1. **Open the app** in Chrome or Edge browser
+1. **Open the HTTPS URL** (Cloudflare or ngrok) in Chrome or Edge browser
 2. **Wait for the install banner** to appear at the bottom
 3. **Tap "Install"** to add to your home screen
 4. **Confirm installation** when prompted
 
 #### Method 2: Manual Installation
-1. **Open the app** in your browser
+1. **Open the ngrok URL** in your browser
 2. **Tap the menu button** (⋮) in the top-right corner
 3. **Select "Install app"** or "Add to Home screen"
 4. **Confirm installation** by tapping "Install"
@@ -38,7 +55,7 @@ A Progressive Web App (PWA) is a web application that can be installed on your d
 ### iOS (iPhone/iPad)
 
 #### Installation Steps
-1. **Open the app** in Safari browser
+1. **Open the ngrok URL** in Safari browser
 2. **Tap the Share button** 📤 at the bottom of the screen
 3. **Scroll down** and tap **"Add to Home Screen"** 🏠
 4. **Edit the name** if desired (default: "Coloc")
@@ -74,7 +91,7 @@ Share Sheet:
 ### Desktop (Chrome/Edge)
 
 #### Installation Steps
-1. **Open the app** in Chrome or Edge browser
+1. **Open the ngrok URL** in Chrome or Edge browser
 2. **Look for the install icon** (⬇) in the address bar
 3. **Click the install icon**
 4. **Click "Install"** in the confirmation dialog
@@ -151,13 +168,21 @@ YouTube App → Share → Coloc → Auto-fill URL → Ready to Download
 ### Install Issues
 
 #### "Install" button not showing
+- **Use HTTPS URL** (Cloudflare Tunnel or ngrok - required for PWA installation)
 - **Ensure you're using a supported browser** (Chrome, Edge, Firefox)
 - **Check internet connection**
 - **Clear browser cache** and reload
 - **Try manual installation** method
 
+#### "Site cannot be installed" error
+- **Use HTTPS URL** - self-signed certificates don't work
+- **Check tunnel is running** (Cloudflare or ngrok) and active
+- **Try a different browser** (Chrome recommended)
+- **Ensure HTTPS padlock** is showing in address bar
+
 #### iOS installation not working
 - **Use Safari browser** (other browsers don't support PWA installation)
+- **Use HTTPS URL** (required for iOS)
 - **Ensure iOS 13.4+** for full PWA support
 - **Check storage space** on device
 - **Restart Safari** and try again
@@ -195,6 +220,15 @@ YouTube App → Share → Coloc → Auto-fill URL → Ready to Download
 - **Verify VLC configuration**
 - **Ensure sufficient storage space**
 - **Check internet connectivity**
+
+#### Tunnel Issues
+```bash
+# For Cloudflare Tunnel
+cloudflared tunnel --url http://localhost:8080 --loglevel debug
+
+# For ngrok (if you prefer)
+ngrok http 8080 --log debug
+```
 
 ## 📋 Device Compatibility
 

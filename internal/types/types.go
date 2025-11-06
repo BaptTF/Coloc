@@ -61,6 +61,7 @@ type WSMessage struct {
 	Message    string      `json:"message,omitempty"`
 	Videos     []string    `json:"videos,omitempty"`
 	Queue      []JobStatus `json:"queue,omitempty"`
+	AutoPlay   *bool       `json:"autoPlay,omitempty"`
 	// VLC-specific fields
 	VLCStatus *VLCStatus `json:"vlcStatus,omitempty"`
 	VLCQueue  *VLCQueue  `json:"vlcQueue,omitempty"`

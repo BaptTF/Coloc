@@ -15,6 +15,7 @@ type ServerState struct {
 	VLCQueue       *types.VLCQueue  `json:"vlcQueue,omitempty"`
 	VLCVolume      *types.VLCVolume `json:"vlcVolume,omitempty"`
 	LastVLCUpdate  time.Time        `json:"lastVlcUpdate"`
+	AutoPlay       bool             `json:"autoPlay"`
 	mutex          sync.RWMutex
 }
 
@@ -22,6 +23,7 @@ var globalState = &ServerState{
 	YtdlpStatus:    "unknown",
 	YtdlpMessage:   "En attente...",
 	YtdlpUpdatedAt: time.Now(),
+	AutoPlay:       true, // Default to true (checkbox is checked by default)
 }
 
 // GetYtdlpStatus returns the current yt-dlp status
@@ -57,6 +59,20 @@ func SetVLCState(status *types.VLCStatus, queue *types.VLCQueue, volume *types.V
 	globalState.LastVLCUpdate = time.Now()
 }
 
+// GetAutoPlay returns the current autoplay setting
+func GetAutoPlay() bool {
+	globalState.mutex.RLock()
+	defer globalState.mutex.RUnlock()
+	return globalState.AutoPlay
+}
+
+// SetAutoPlay updates the autoplay setting
+func SetAutoPlay(autoPlay bool) {
+	globalState.mutex.Lock()
+	defer globalState.mutex.Unlock()
+	globalState.AutoPlay = autoPlay
+}
+
 // GetServerState returns the full server state
 func GetServerState() map[string]interface{} {
 	globalState.mutex.RLock()
@@ -70,5 +86,6 @@ func GetServerState() map[string]interface{} {
 		"vlcQueue":       globalState.VLCQueue,
 		"vlcVolume":      globalState.VLCVolume,
 		"lastVlcUpdate":  globalState.LastVLCUpdate,
+		"autoPlay":       globalState.AutoPlay,
 	}
 }

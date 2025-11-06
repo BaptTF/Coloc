@@ -144,3 +144,14 @@ func BroadcastQueueStatus() {
 	log.Printf("Broadcasting queue status to all clients")
 	BroadcastToAll(msg)
 }
+
+// BroadcastAutoPlay broadcasts the current autoplay setting to all clients
+func BroadcastAutoPlay(autoPlay bool) {
+	msg := types.WSMessage{
+		Type:     "autoPlay",
+		AutoPlay: &autoPlay,
+	}
+
+	log.Printf("Broadcasting autoplay setting to all clients: %v", autoPlay)
+	BroadcastToAll(msg)
+}

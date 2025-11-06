@@ -7,6 +7,12 @@
 # Start services for testing
 docker compose up -d --build
 
+# PWA Testing with Cloudflare Tunnel (trusted HTTPS - recommended)
+cloudflared tunnel --url http://localhost:8080
+
+# Alternative: ngrok (requires registration)
+ngrok http 8080
+
 # Run unit tests
 go test ./internal/... ./pkg/... -v
 

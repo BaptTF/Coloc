@@ -18,7 +18,6 @@ export class MobileComponents {
     setTimeout(() => {
       this.setupMobileNavigation();
       this.setupPullToRefresh();
-      this.setupSwipeableCards();
       this.setupBottomSheets();
       this.setupTouchOptimizations();
       this.setupResizeHandler();
@@ -222,49 +221,7 @@ export class MobileComponents {
     return indicator;
   }
 
-  setupSwipeableCards() {
-    const cards = document.querySelectorAll('.download-item');
-    
-    cards.forEach(card => {
-      let startX = 0;
-      let currentX = 0;
-      let swiping = false;
-
-      card.addEventListener('touchstart', (e) => {
-        startX = e.touches[0].clientX;
-        swiping = true;
-        card.style.transition = 'none';
-      });
-
-      card.addEventListener('touchmove', (e) => {
-        if (!swiping) return;
-
-        currentX = e.touches[0].clientX;
-        const diff = startX - currentX;
-
-        if (diff > 0 && diff < 100) {
-          e.preventDefault();
-          card.style.transform = `translateX(-${diff}px)`;
-        }
-      });
-
-      card.addEventListener('touchend', () => {
-        if (!swiping) return;
-
-        const diff = startX - currentX;
-        card.style.transition = 'transform 0.3s ease';
-
-        if (diff > 50) {
-          card.classList.add('swiped');
-          card.style.transform = 'translateX(-80px)';
-        } else {
-          card.style.transform = 'translateX(0)';
-        }
-
-        swiping = false;
-      });
-    });
-  }
+  
 
   setupBottomSheets() {
     // Create bottom sheet functionality

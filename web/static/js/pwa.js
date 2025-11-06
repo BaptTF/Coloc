@@ -1,4 +1,3 @@
-// ===== PWA MANAGER =====
 // Handles Progressive Web App installation, service worker, and mobile features
 
 class PWAManager {
@@ -218,132 +217,21 @@ class PWAManager {
   // ===== WEB SHARE TARGET =====
   handleSharedURL() {
     const urlParams = new URLSearchParams(window.location.search);
-    const sharedURL = urlParams.get('url');
-    const sharedTitle = urlParams.get('title');
-    const sharedText = urlParams.get('text');
+    const autoDownload = urlParams.get('autoDownload');
+    const downloadType = urlParams.get('type');
     
-    if (sharedURL) {
-      console.log('[PWA] Shared URL detected:', sharedURL);
-      console.log('[PWA] Document ready state:', document.readyState);
-      
-      // Check if DOM is already loaded
-      if (document.readyState === 'loading') {
-        // DOM is still loading, wait for DOMContentLoaded
-        document.addEventListener('DOMContentLoaded', () => {
-          console.log('[PWA] DOM loaded, processing shared URL');
-          this.processSharedURL(sharedURL, sharedTitle, sharedText);
-        });
-      } else {
-        // DOM is already loaded, process immediately with a small delay
-        setTimeout(() => {
-          console.log('[PWA] DOM already loaded, processing shared URL immediately');
-          this.processSharedURL(sharedURL, sharedTitle, sharedText);
-        }, 100);
-      }
-    } else {
-      console.log('[PWA] No shared URL detected');
-    }
-  }
-
-  async processSharedURL(url, title, text) {
-    try {
-      console.log('[PWA] Processing shared URL:', { url, title, text });
-      
-      // Find the URL input
-      const urlInput = document.getElementById('videoUrl');
-      if (!urlInput) {
-        console.error('[PWA] URL input not found - DOM elements:', {
-          videoUrl: !!document.getElementById('videoUrl'),
-          body: !!document.body,
-          readyState: document.readyState
-        });
-        return;
-      }
-
-      console.log('[PWA] URL input found, filling with:', url);
-      
-      // Fill the input
-      urlInput.value = url;
-      
-      // Analyze the URL to suggest download mode
-      const analysis = this.analyzeURL(url);
-      console.log('[PWA] URL analysis:', analysis);
-      
-      // Show visual feedback
-      this.showSharedURLFeedback(url, title, text, analysis);
-      
-      // Scroll to download section
-      const downloadSection = document.querySelector('.section:has(#videoUrl)');
-      if (downloadSection) {
-        console.log('[PWA] Scrolling to download section');
-        downloadSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      } else {
-        console.log('[PWA] Download section not found, trying alternative selector');
-        const alternativeSection = document.querySelector('#videoUrl')?.closest('.section');
-        if (alternativeSection) {
-          alternativeSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }
-      
-      // Highlight the input
-      console.log('[PWA] Adding highlight to input');
-      urlInput.classList.add('shared-url-highlight');
-      setTimeout(() => {
-        urlInput.classList.remove('shared-url-highlight');
-        console.log('[PWA] Removed highlight from input');
-      }, 2000);
-      
-      // Clean URL for better UX
-      const cleanURL = new URL(window.location);
-      cleanURL.searchParams.delete('url');
-      cleanURL.searchParams.delete('title');
-      cleanURL.searchParams.delete('text');
-      window.history.replaceState({}, '', cleanURL.toString());
-      
-      console.log('[PWA] Shared URL processed successfully');
-      
-    } catch (error) {
-      console.error('[PWA] Error processing shared URL:', error);
-      console.error('[PWA] Error stack:', error.stack);
-    }
-  }
-
-  analyzeURL(url) {
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-      return { platform: 'youtube', mode: 'download', icon: '/static/icons/yt-dlp.png', iconAlt: 'yt-dlp' };
-    } else if (url.includes('twitch.tv')) {
-      return { platform: 'twitch', mode: 'stream', icon: '🎮' };
-    } else if (url.match(/\.(mp4|avi|mkv|webm|mov)$/i)) {
-      return { platform: 'direct', mode: 'play', icon: '🎬' };
-    }
-    return { platform: 'unknown', mode: 'download', icon: '/static/icons/websocket.png', iconAlt: 'WebSocket' };
-  }
-
-  showSharedURLFeedback(url, title, text, analysis) {
-    console.log('[PWA] Showing shared URL feedback:', { url, title, text, analysis });
-    
-    if (!window.toastManager) {
-      console.error('[PWA] ToastManager not available for feedback');
-      // Fallback to console feedback
-      console.log(`[PWA] ${analysis.icon} URL reçu: ${analysis.platform}`);
-      if (title || text) {
-        console.log(`[PWA] Details: ${title || text || 'Prêt à télécharger!'}`);
+    // Handle auto-download redirect from backend
+    if (autoDownload === 'true' && downloadType) {
+      console.log('[PWA] Auto-download redirect detected, switching to videos tab');
+      // Switch to videos tab to show download progress
+      if (window.tabManager) {
+        window.tabManager.switchToTab('videos');
       }
       return;
     }
     
-    const message = `${analysis.icon} URL reçu: ${analysis.platform}`;
-    console.log('[PWA] Showing success toast:', message);
-    window.toastManager.success(message);
-    
-    // Show more detailed feedback if available
-    if (title || text) {
-      setTimeout(() => {
-        const details = title || text || 'Prêt à télécharger!';
-        console.log('[PWA] Showing info toast:', details);
-        window.toastManager.info(details);
-      }, 1000);
-    }
+    // No share target parameters to handle
+    return;
   }
 
   // ===== MOBILE FEATURES =====
@@ -462,14 +350,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize PWA Manager
   window.pwaManager = new PWAManager();
   
-  // Add debug function for testing share target
-  window.testShareTarget = (url, title, text) => {
-    console.log('[PWA] Manual test of share target with:', { url, title, text });
-    if (window.pwaManager) {
-      window.pwaManager.processSharedURL(url, title, text);
-    } else {
-      console.error('[PWA] PWAManager not available');
-    }
+  // Add debug function for testing share target (updated to use backend)
+  window.testShareTarget = (url) => {
+    console.log('[PWA] Manual test of share target with URL:', url);
+    // Create a form and submit it to the backend share target endpoint
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/share-target';
+    
+    const urlInput = document.createElement('input');
+    urlInput.type = 'hidden';
+    urlInput.name = 'url';
+    urlInput.value = url;
+    
+    form.appendChild(urlInput);
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
   };
   
   // Setup install button

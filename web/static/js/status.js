@@ -41,30 +41,21 @@ static statusEmojis = {
     }
 
     statusEl.className = `status-indicator ${className.replace('status ', '')}`;
-    const isMobile = window.innerWidth <= 768;
     const stateEmoji = StatusManager.statusEmojis[status] || '❓';
     
-    if (isMobile) {
-      // Check if dual-indicator structure already exists
-      const typeEl = statusEl.querySelector('.status-type-icon');
-      const stateEl = statusEl.querySelector('.status-state');
-      
-      
-      
-      if (typeEl && stateEl) {
-        // Preserve existing structure, only update state emoji
-        stateEl.textContent = stateEmoji;
-      } else {
-        // Create dual-indicator structure if it doesn't exist
-        statusEl.innerHTML = `
-          <img src="/static/icons/vlc.png" alt="VLC" class="status-type-icon">
-          <span class="status-state">${stateEmoji}</span>
-        `;
-      }
+    // Use emoji system for both mobile and desktop
+    // Check if dual-indicator structure already exists
+    const typeEl = statusEl.querySelector('.status-type-icon');
+    const stateEl = statusEl.querySelector('.status-state');
+    
+    if (typeEl && stateEl) {
+      // Preserve existing structure, only update state emoji
+      stateEl.textContent = stateEmoji;
     } else {
+      // Create dual-indicator structure if it doesn't exist
       statusEl.innerHTML = `
-        <div class="status-dot"></div>
-        ${text}
+        <img src="/static/icons/vlc.png" alt="VLC" class="status-type-icon">
+        <span class="status-state">${stateEmoji}</span>
       `;
     }
 
@@ -98,28 +89,23 @@ static statusEmojis = {
       statusText.textContent = text || (connected ? 'Connecté' : 'Non connecté');
     }
     
-    // Update mobile emoji
+    // Update emoji for both mobile and desktop
     if (wsIndicator) {
-      const isMobile = window.innerWidth <= 768;
       const stateEmoji = connected ? '✅' : '❌';
       
-if (isMobile) {
       // Check if dual-indicator structure already exists
-      const typeEl = statusEl.querySelector('.status-type-icon');
-      const stateEl = statusEl.querySelector('.status-state');
-      
-      
+      const typeEl = wsIndicator.querySelector('.status-type-icon');
+      const stateEl = wsIndicator.querySelector('.status-state');
       
       if (typeEl && stateEl) {
         // Preserve existing structure, only update state emoji
         stateEl.textContent = stateEmoji;
       } else {
-          // Create dual-indicator structure if it doesn't exist
-          wsIndicator.innerHTML = `
-            <img src="/static/icons/websocket.png" alt="WebSocket" class="status-type-icon">
-            <span class="status-state">${stateEmoji}</span>
-          `;
-        }
+        // Create dual-indicator structure if it doesn't exist
+        wsIndicator.innerHTML = `
+          <img src="/static/icons/websocket.png" alt="WebSocket" class="status-type-icon">
+          <span class="status-state">${stateEmoji}</span>
+        `;
       }
     }
     
@@ -225,30 +211,21 @@ if (isMobile) {
     }
 
     statusEl.className = `status-indicator ${className.replace('status ', '')}`;
-    const isMobile = window.innerWidth <= 768;
     const stateEmoji = StatusManager.statusEmojis[status] || '❓';
     
-    if (isMobile) {
-      // Check if dual-indicator structure already exists
-      const typeEl = statusEl.querySelector('.status-type-icon');
-      const stateEl = statusEl.querySelector('.status-state');
-      
-      
-      
-      if (typeEl && stateEl) {
-        // Preserve existing structure, only update state emoji
-        stateEl.textContent = stateEmoji;
-      } else {
-        // Create dual-indicator structure if it doesn't exist
-        statusEl.innerHTML = `
-          <img src="/static/icons/yt-dlp.png" alt="yt-dlp" class="status-type-icon">
-          <span class="status-state">${stateEmoji}</span>
-        `;
-      }
+    // Use emoji system for both mobile and desktop
+    // Check if dual-indicator structure already exists
+    const typeEl = statusEl.querySelector('.status-type-icon');
+    const stateEl = statusEl.querySelector('.status-state');
+    
+    if (typeEl && stateEl) {
+      // Preserve existing structure, only update state emoji
+      stateEl.textContent = stateEmoji;
     } else {
+      // Create dual-indicator structure if it doesn't exist
       statusEl.innerHTML = `
-        <div class="status-dot"></div>
-        ${text}
+        <img src="/static/icons/yt-dlp.png" alt="yt-dlp" class="status-type-icon">
+        <span class="status-state">${stateEmoji}</span>
       `;
     }
   }

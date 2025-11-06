@@ -183,6 +183,26 @@ function setupEventListeners() {
   if (themeToggleBtn) {
     themeToggleBtn.onclick = () => themeManager.toggleTheme();
   }
+
+  // AutoPlay checkbox sync with server
+  if (elements.autoPlay) {
+    elements.autoPlay.addEventListener('change', async (e) => {
+      try {
+        const response = await fetch('/api/autoplay', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ autoPlay: e.target.checked }),
+        });
+        if (!response.ok) throw new Error('Failed to sync autoplay setting');
+      } catch (error) {
+        console.error('[Events] Failed to sync autoplay setting:', error);
+        // Revert the checkbox state if sync failed
+        e.target.checked = !e.target.checked;
+      }
+    });
+  }
 }
 
 export { setupEventListeners };

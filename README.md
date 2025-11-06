@@ -23,31 +23,70 @@ This application solves a common problem: downloading videos from various source
 - ⚡ **Smart Error Handling**: User-friendly error messages for unsupported URLs
 - 🎯 **Dual Mode**: Download & save or direct streaming to VLC
 - 🌐 **Modern Web UI**: Responsive interface accessible from any device
+- 📱 **PWA Support**: Install as a native app on mobile devices
+- 🔐 **Trusted HTTPS**: ngrok integration for secure PWA installation
 - 🐳 **Docker Ready**: One-command deployment with Docker Compose
 - 🔍 **yt-dlp Auto-update**: Automatic updates and version checking
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-
-- Docker and Docker Compose installed
-- VLC media player with web interface enabled (see [VLC Setup](#vlc-setup))
+- Docker and Docker Compose
+- Go 1.23+
+- VLC with libvlc (for media processing)
 
 ### Installation
-
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd Coloc
+git clone https://github.com/yourusername/coloc.git
+cd coloc
 
-# Start the application
-docker compose up -d --build
+# Build and run with Docker
+docker compose up -d
 
 # Access the web interface
 open http://localhost:8080
 ```
 
+### PWA Installation (Mobile App)
+For mobile app experience with trusted HTTPS:
+
+**Option 1: Cloudflare Tunnel (Recommended - Free, No Registration)**
+```bash
+# Start with automated script
+./scripts/start-cloudflare.sh
+
+# Or manually:
+docker compose up -d
+cloudflared tunnel --url http://localhost:8080
+```
+
+**Option 2: ngrok (Requires Registration)**
+```bash
+docker compose up -d
+ngrok http 8080
+```
+
+Use the provided HTTPS URL on your mobile device - PWA install prompt will appear automatically.
+
 That's it! The application is now running and ready to download videos.
+
+### 📱 PWA Testing (Recommended)
+
+For mobile testing and PWA installation, use ngrok for trusted HTTPS:
+
+```bash
+# Install ngrok (NixOS)
+nix-env -iA nixpkgs.ngrok
+
+# Start ngrok tunnel
+ngrok http 8080
+
+# Or use the automated script
+./scripts/ngrok-start.sh
+```
+
+Use the ngrok URL (e.g., `https://abc123.ngrok.io`) to install the PWA on your mobile device.
 
 ### VLC Setup
 
