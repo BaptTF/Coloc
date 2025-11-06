@@ -14,10 +14,7 @@ async function initializeApp() {
   // Initialize DOM elements
   initializeElements();
 
-  // Set default backend URL
-  if (elements.backendUrl) {
-    elements.backendUrl.value = window.location.origin;
-  }
+  
 
   // Setup event listeners
   setupEventListeners();
@@ -75,9 +72,33 @@ async function loadServerState() {
       StatusManager.updateVlcStatus('disconnected');
     }
     
-    // Sync autoplay setting with server
+    // Update backend URL with current origin and sync to server
+    const currentBackendUrl = window.location.origin;
+    if (elements.backendUrl) {
+      elements.backendUrl.value = currentBackendUrl;
+    }
+    
+    // Send current backend URL to server to update server state
+    try {
+      await fetch('/api/backend-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ backendUrl: currentBackendUrl }),
+      });
+      console.log('[App] Backend URL synced to server:', currentBackendUrl);
+    } catch (error) {
+      console.error('[App] Failed to sync backend URL:', error);
+    }
+    
+    // Sync other settings with server
     if (state.autoPlay !== undefined && elements.autoPlay) {
       elements.autoPlay.checked = state.autoPlay;
+    }
+    
+    if (state.vlcUrl !== undefined && elements.vlcUrl) {
+      elements.vlcUrl.value = state.vlcUrl;
     }
   } catch (error) {
     console.error('Failed to load server state:', error);

@@ -305,8 +305,10 @@ func shareTargetHandler(w http.ResponseWriter, r *http.Request) {
 		mode = "stream"
 	}
 
-	// Get autoplay setting from server state
+	// Get settings from server state
 	autoPlay := state.GetAutoPlay()
+	vlcUrl := state.GetVLCUrl()
+	backendUrl := state.GetBackendUrl()
 
 	// Create download request
 	var requestData map[string]interface{}
@@ -314,16 +316,16 @@ func shareTargetHandler(w http.ResponseWriter, r *http.Request) {
 		requestData = map[string]interface{}{
 			"url":        extractedURL,
 			"autoPlay":   autoPlay,
-			"vlcUrl":     "",
-			"backendUrl": "",
+			"vlcUrl":     vlcUrl,
+			"backendUrl": backendUrl,
 			"mode":       mode,
 		}
 	} else {
 		requestData = map[string]interface{}{
 			"url":        extractedURL,
 			"autoPlay":   autoPlay,
-			"vlcUrl":     "",
-			"backendUrl": "",
+			"vlcUrl":     vlcUrl,
+			"backendUrl": backendUrl,
 		}
 	}
 
@@ -409,6 +411,8 @@ func main() {
 	// API endpoints (must be before the catch-all "/" handler)
 	http.HandleFunc("/api/state", handlers.ServerStateHandler)
 	http.HandleFunc("/api/autoplay", handlers.AutoPlayHandler)
+	http.HandleFunc("/api/vlc-url", handlers.VLCUrlHandler)
+	http.HandleFunc("/api/backend-url", handlers.BackendUrlHandler)
 	http.HandleFunc("/queue", queueStatusHandler)
 	http.HandleFunc("/queue/clear", clearQueueHandler)
 	http.HandleFunc("/url", handlers.DownloadURLHandler)

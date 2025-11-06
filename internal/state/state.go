@@ -16,6 +16,8 @@ type ServerState struct {
 	VLCVolume      *types.VLCVolume `json:"vlcVolume,omitempty"`
 	LastVLCUpdate  time.Time        `json:"lastVlcUpdate"`
 	AutoPlay       bool             `json:"autoPlay"`
+	VLCUrl         string           `json:"vlcUrl"`
+	BackendUrl     string           `json:"backendUrl"`
 	mutex          sync.RWMutex
 }
 
@@ -23,7 +25,9 @@ var globalState = &ServerState{
 	YtdlpStatus:    "unknown",
 	YtdlpMessage:   "En attente...",
 	YtdlpUpdatedAt: time.Now(),
-	AutoPlay:       true, // Default to true (checkbox is checked by default)
+	AutoPlay:       true,                        // Default to true (checkbox is checked by default)
+	VLCUrl:         "http://192.168.4.168:8080", // Default VLC URL
+	BackendUrl:     "",                          // Will be set by frontend on first load
 }
 
 // GetYtdlpStatus returns the current yt-dlp status
@@ -73,6 +77,34 @@ func SetAutoPlay(autoPlay bool) {
 	globalState.AutoPlay = autoPlay
 }
 
+// GetVLCUrl returns the current VLC URL
+func GetVLCUrl() string {
+	globalState.mutex.RLock()
+	defer globalState.mutex.RUnlock()
+	return globalState.VLCUrl
+}
+
+// SetVLCUrl updates the VLC URL
+func SetVLCUrl(vlcUrl string) {
+	globalState.mutex.Lock()
+	defer globalState.mutex.Unlock()
+	globalState.VLCUrl = vlcUrl
+}
+
+// GetBackendUrl returns the current Backend URL
+func GetBackendUrl() string {
+	globalState.mutex.RLock()
+	defer globalState.mutex.RUnlock()
+	return globalState.BackendUrl
+}
+
+// SetBackendUrl updates the Backend URL
+func SetBackendUrl(backendUrl string) {
+	globalState.mutex.Lock()
+	defer globalState.mutex.Unlock()
+	globalState.BackendUrl = backendUrl
+}
+
 // GetServerState returns the full server state
 func GetServerState() map[string]interface{} {
 	globalState.mutex.RLock()
@@ -87,5 +119,7 @@ func GetServerState() map[string]interface{} {
 		"vlcVolume":      globalState.VLCVolume,
 		"lastVlcUpdate":  globalState.LastVLCUpdate,
 		"autoPlay":       globalState.AutoPlay,
+		"vlcUrl":         globalState.VLCUrl,
+		"backendUrl":     globalState.BackendUrl,
 	}
 }

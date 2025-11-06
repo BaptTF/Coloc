@@ -173,7 +173,17 @@ class VlcManager {
     if (!vlcUrl) return;
 
     try {
+      // Save to old VLC config endpoint (for file-based persistence)
       await ApiClient.post(CONFIG.endpoints.vlcConfig, { url: vlcUrl });
+      
+      // Also update server state for live sync
+      await fetch('/api/vlc-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ vlcUrl: vlcUrl }),
+      });
     } catch (error) {
       console.error('Erreur sauvegarde config VLC:', error);
     }

@@ -137,6 +137,20 @@ class WebSocketManager {
           elements.autoPlay.checked = message.autoPlay;
         }
         break;
+      case 'vlcUrl':
+        // Live VLC URL update
+        console.log('Received vlcUrl message:', message.vlcUrl);
+        if (elements.vlcUrl && message.vlcUrl !== undefined) {
+          elements.vlcUrl.value = message.vlcUrl;
+        }
+        break;
+      case 'backendUrl':
+        // Live Backend URL update
+        console.log('Received backendUrl message:', message.backendUrl);
+        if (elements.backendUrl && message.backendUrl !== undefined) {
+          elements.backendUrl.value = message.backendUrl;
+        }
+        break;
       case 'list':
         VideoManager.renderVideoGrid(message.videos);
         break;

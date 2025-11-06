@@ -16,49 +16,10 @@ export class MobileComponents {
   init() {
     // Wait a bit for other modules to initialize
     setTimeout(() => {
-      this.setupMobileNavigation();
-      this.setupPullToRefresh();
       this.setupBottomSheets();
       this.setupTouchOptimizations();
       this.setupResizeHandler();
     }, 100);
-  }
-
-  setupMobileNavigation() {
-    // Mobile navigation is no longer needed since we have a compact header
-    // Only create on very small screens if needed in the future
-    if (!this.isMobile || !document.querySelector('.header-content')) {
-      return;
-    }
-    
-    // Skip mobile navigation creation - our new header is mobile-friendly
-    return;
-
-    const toggle = document.querySelector('.mobile-nav-toggle');
-    const menu = document.querySelector('.mobile-menu');
-    const close = document.querySelector('.mobile-menu-close');
-
-    if (toggle && menu) {
-      toggle.addEventListener('click', () => this.toggleMobileMenu());
-      
-      if (close) {
-        close.addEventListener('click', () => this.closeMobileMenu());
-      }
-
-      // Close menu when clicking outside
-      menu.addEventListener('click', (e) => {
-        if (e.target === menu) {
-          this.closeMobileMenu();
-        }
-      });
-
-      // Close menu on escape key
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && menu.classList.contains('active')) {
-          this.closeMobileMenu();
-        }
-      });
-    }
   }
 
   createMobileNavigation() {
@@ -134,94 +95,6 @@ export class MobileComponents {
       document.body.style.overflow = '';
     }
   }
-
-  setupPullToRefresh() {
-    // Disabled pull-to-refresh to prevent unwanted page refreshes
-    return;
-
-    let startY = 0;
-    let currentY = 0;
-    let pulling = false;
-
-    document.addEventListener('touchstart', (e) => {
-      if (window.scrollY === 0) {
-        startY = e.touches[0].clientY;
-        pulling = true;
-      }
-    });
-
-    document.addEventListener('touchmove', (e) => {
-      if (!pulling) return;
-
-      currentY = e.touches[0].clientY;
-      const diff = currentY - startY;
-
-      if (diff > 0 && diff < this.pullToRefreshThreshold * 2) {
-        e.preventDefault();
-        this.showPullToRefresh(diff);
-      }
-    });
-
-    document.addEventListener('touchend', () => {
-      if (!pulling) return;
-
-      const diff = currentY - startY;
-      if (diff > this.pullToRefreshThreshold) {
-        this.triggerRefresh();
-      } else {
-        this.hidePullToRefresh();
-      }
-
-      pulling = false;
-    });
-  }
-
-  showPullToRefresh(distance) {
-    let indicator = document.querySelector('.pull-to-refresh');
-    if (!indicator) {
-      indicator = this.createPullToRefreshIndicator();
-    }
-
-    const progress = Math.min(distance / this.pullToRefreshThreshold, 1);
-    indicator.style.transform = `translateY(${Math.min(distance, this.pullToRefreshThreshold)}px)`;
-    
-    if (progress >= 1) {
-      indicator.classList.add('ready');
-    } else {
-      indicator.classList.remove('ready');
-    }
-  }
-
-  hidePullToRefresh() {
-    const indicator = document.querySelector('.pull-to-refresh');
-    if (indicator) {
-      indicator.style.transform = 'translateY(-60px)';
-      indicator.classList.remove('ready', 'refreshing');
-    }
-  }
-
-  triggerRefresh() {
-    const indicator = document.querySelector('.pull-to-refresh');
-    if (indicator) {
-      indicator.classList.add('refreshing');
-      indicator.innerHTML = '<div class="spinner"></div> Refreshing...';
-    }
-
-    // Trigger page refresh
-    setTimeout(() => {
-      window.location.reload();
-    }, 1000);
-  }
-
-  createPullToRefreshIndicator() {
-    const indicator = document.createElement('div');
-    indicator.className = 'pull-to-refresh';
-    indicator.innerHTML = '<div class="spinner"></div> Pull to refresh';
-    document.body.appendChild(indicator);
-    return indicator;
-  }
-
-  
 
   setupBottomSheets() {
     // Create bottom sheet functionality

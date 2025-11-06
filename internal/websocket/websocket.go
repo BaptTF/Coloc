@@ -155,3 +155,25 @@ func BroadcastAutoPlay(autoPlay bool) {
 	log.Printf("Broadcasting autoplay setting to all clients: %v", autoPlay)
 	BroadcastToAll(msg)
 }
+
+// BroadcastVLCUrl broadcasts the current VLC URL to all clients
+func BroadcastVLCUrl(vlcUrl string) {
+	msg := types.WSMessage{
+		Type:   "vlcUrl",
+		VLCUrl: &vlcUrl,
+	}
+
+	log.Printf("Broadcasting VLC URL to all clients: %s", vlcUrl)
+	BroadcastToAll(msg)
+}
+
+// BroadcastBackendUrl broadcasts the current Backend URL to all clients
+func BroadcastBackendUrl(backendUrl string) {
+	msg := types.WSMessage{
+		Type:       "backendUrl",
+		BackendUrl: &backendUrl,
+	}
+
+	log.Printf("Broadcasting Backend URL to all clients: %s", backendUrl)
+	BroadcastToAll(msg)
+}

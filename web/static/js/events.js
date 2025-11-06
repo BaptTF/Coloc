@@ -203,6 +203,45 @@ function setupEventListeners() {
       }
     });
   }
+
+  // VLC URL input sync with server
+  if (elements.vlcUrl) {
+    elements.vlcUrl.addEventListener('change', async (e) => {
+      try {
+        const response = await fetch('/api/vlc-url', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ vlcUrl: e.target.value.trim() }),
+        });
+        if (!response.ok) throw new Error('Failed to sync VLC URL');
+      } catch (error) {
+        console.error('[Events] Failed to sync VLC URL:', error);
+      }
+    });
+  }
+
+  // Backend URL input sync with server (only for manual changes, not initial load)
+  if (elements.backendUrl) {
+    elements.backendUrl.addEventListener('change', async (e) => {
+      // Only sync if this is a manual change (not the initial load)
+      if (e.target.value !== window.location.origin) {
+        try {
+          const response = await fetch('/api/backend-url', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ backendUrl: e.target.value.trim() }),
+          });
+          if (!response.ok) throw new Error('Failed to sync Backend URL');
+        } catch (error) {
+          console.error('[Events] Failed to sync Backend URL:', error);
+        }
+      }
+    });
+  }
 }
 
 export { setupEventListeners };

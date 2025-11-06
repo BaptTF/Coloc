@@ -30,8 +30,10 @@ func ServerStateHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Get autoplay setting
+	// Get settings from server state
 	autoPlay := state.GetAutoPlay()
+	vlcUrl := state.GetVLCUrl()
+	backendUrl := state.GetBackendUrl()
 
 	// Build response
 	response := map[string]interface{}{
@@ -43,7 +45,9 @@ func ServerStateHandler(w http.ResponseWriter, r *http.Request) {
 		"vlc": map[string]interface{}{
 			"sessions": vlcSessions,
 		},
-		"autoPlay": autoPlay,
+		"autoPlay":   autoPlay,
+		"vlcUrl":     vlcUrl,
+		"backendUrl": backendUrl,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -75,6 +79,68 @@ func AutoPlayHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"autoPlay": req.AutoPlay,
+		})
+	default:
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+	}
+}
+
+// VLCUrlHandler handles getting and updating the VLC URL setting
+func VLCUrlHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		vlcUrl := state.GetVLCUrl()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"vlcUrl": vlcUrl,
+		})
+	case http.MethodPost:
+		var req struct {
+			VLCUrl string `json:"vlcUrl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			sendError(w, "Requête invalide", http.StatusBadRequest)
+			return
+		}
+		state.SetVLCUrl(req.VLCUrl)
+
+		// Broadcast the change to all connected clients
+		websocket.BroadcastVLCUrl(req.VLCUrl)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"vlcUrl": req.VLCUrl,
+		})
+	default:
+		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+	}
+}
+
+// BackendUrlHandler handles getting and updating the Backend URL setting
+func BackendUrlHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		backendUrl := state.GetBackendUrl()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"backendUrl": backendUrl,
+		})
+	case http.MethodPost:
+		var req struct {
+			BackendUrl string `json:"backendUrl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			sendError(w, "Requête invalide", http.StatusBadRequest)
+			return
+		}
+		state.SetBackendUrl(req.BackendUrl)
+
+		// Broadcast the change to all connected clients
+		websocket.BroadcastBackendUrl(req.BackendUrl)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"backendUrl": req.BackendUrl,
 		})
 	default:
 		sendError(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
